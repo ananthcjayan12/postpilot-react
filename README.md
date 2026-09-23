@@ -96,17 +96,18 @@ Your Instagram account must be **Business or Creator**, and it should be linked 
 
 ### Meta developer setup
 
-1. Create a Meta developer app. A Business-type app is the simplest fit.
-2. Add/configure the products needed for Facebook Login / Facebook Login for Business and Instagram API access.
-3. Add this redirect URL to the Facebook login OAuth settings:
+1. Create a Meta developer app and add the two use cases **Manage everything on your Page** and **Manage messaging & content on Instagram**.
+2. Under **Manage Pages → Permissions and features**, make these permissions Ready for testing: `pages_show_list`, `pages_read_engagement`, and `pages_manage_posts`.
+3. Under **Instagram API**, choose **API setup with Facebook login** (not Instagram login). Enable `instagram_basic` and `instagram_content_publish`.
+4. Configure the Facebook login OAuth redirect URL:
 
 ```text
 http://localhost:8787/api/oauth/meta/callback
 ```
 
-4. Keep your own Facebook account assigned to the app as an Administrator/Developer/Tester while using the app only for your own Page/account.
-5. Make sure your Facebook user has content-creation permissions on the Page.
-6. Put these values in `.env`:
+5. Keep your own Facebook account assigned to the app as an Administrator/Developer/Tester while using the app only for your own Page/account.
+6. Make sure your Facebook user has content-creation permissions on the Page and that the Instagram Professional account is linked to that Page.
+7. Put these values in `.env`:
 
 ```env
 META_APP_ID=...
@@ -127,12 +128,11 @@ PostPilot requests:
 pages_show_list
 pages_read_engagement
 pages_manage_posts
-publish_video
 instagram_basic
 instagram_content_publish
 ```
 
-For an app used only by your own app-role account(s), you can develop/test in Meta Development mode. App Review becomes relevant when you want broader Live-mode access for people outside the app roles.
+PostPilot intentionally does **not** request `publish_video`, Instagram messaging, comment-management, insights, or Business Manager permissions. For an app used only by your own app-role account(s), Standard Access / Ready for testing is the intended setup. App Review becomes relevant when you want broader access for people outside the app roles.
 
 ---
 
