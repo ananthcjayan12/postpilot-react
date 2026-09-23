@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.env
+.env.local
+.DS_Store
+apps/api/data/*.json
+apps/api/data/*.tmp
+apps/api/data/uploads/*
+!apps/api/data/uploads/.gitkeep
+npm-debug.log*
