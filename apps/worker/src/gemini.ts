@@ -16,6 +16,10 @@ const suggestionsSchema = z.object({
   description: z.string().trim().min(1).max(5000),
 });
 
+function logGemini(event: string, fields: Record<string, unknown> = {}) {
+  console.log({ service: 'gemini', event, ...fields });
+}
+
 function uploadError(stage: string, response: Response, body: any, apiKey: string, uploadUrl = '') {
   // Never echo upload-session URLs or credentials from provider error messages.
   let detail = typeof body?.error?.message === 'string' ? body.error.message : '';
@@ -42,25 +46,41 @@ async function googleJson(url: string, apiKey: string, init?: RequestInit) {
   return body;
 }
 
-export async function uploadVideo(env: AppEnv['Bindings'], media: MediaRow, apiKey: string) {
+export async function uploadVideo(env: AppEnv['Bindings'], media: MediaRow, apiKey: string, traceId = crypto.randomUUID()) {
+  const startedAt = Date.now();
+  logGemini('upload_started', { traceId, mediaId: media.id, sizeBytes: media.size, mimeType: media.mime });
   if (media.size > 2 * 1024 ** 3) throw new AppError('Gemini video analysis supports files up to 2 GB.');
   const object = await env.MEDIA.head(media.object_key);
   if (!object) throw new AppError('Uploaded video could not be found.', 404);
   if (object.size !== media.size) throw new AppError('Stored video size does not match the upload record. Upload the video again.');
-  const start = await fetch('https://generativelanguage.googleapis.com/upload/v1beta/files', {
-    signal: AbortSignal.timeout(30_000),
-    method: 'POST',
-    headers: {
-      'x-goog-api-key': apiKey,
-      'Content-Type': 'application/json',
-      'X-Goog-Upload-Protocol': 'resumable',
-      'X-Goog-Upload-Command': 'start',
-      'X-Goog-Upload-Header-Content-Length': String(media.size),
-      'X-Goog-Upload-Header-Content-Type': media.mime,
-    },
-    body: JSON.stringify({ file: { displayName: media.name } }),
-  });
-  if (!start.ok) throw uploadError('upload initialization', start, await start.json().catch(() => null), apiKey);
+  let start: Response;
+  try {
+    start = await fetch('https://generativelanguage.googleapis.com/upload/v1beta/files', {
+      signal: AbortSignal.timeout(30_000),
+      method: 'POST',
+      headers: {
+        'x-goog-api-key': apiKey,
+        'Content-Type': 'application/json',
+        'X-Goog-Upload-Protocol': 'resumable',
+        'X-Goog-Upload-Command': 'start',
+        'X-Goog-Upload-Header-Content-Length': String(media.size),
+        'X-Goog-Upload-Header-Content-Type': media.mime,
+      },
+      body: JSON.stringify({ file: { displayName: media.name } }),
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown network failure';
+    const failure = new AppError(uploadError('initialization', new Response(null, { status: 502 }), { error: { message } }, apiKey).message, 502);
+    logGemini('upload_initialization_failed', { traceId, errorName: error instanceof Error ? error.name : 'UnknownError', error: failure.message, durationMs: Date.now() - startedAt });
+    throw failure;
+  }
+  logGemini('upload_initialized', { traceId, status: start.status, durationMs: Date.now() - startedAt, chunkGranularity: start.headers.get('X-Goog-Upload-Chunk-Granularity') });
+  if (!start.ok) {
+    const responseBody = await start.json().catch(() => null);
+    const error = uploadError('upload initialization', start, responseBody, apiKey);
+    logGemini('upload_initialization_failed', { traceId, status: start.status, error: error.message });
+    throw error;
+  }
   const uploadUrl = start.headers.get('X-Goog-Upload-URL');
   if (!uploadUrl?.startsWith('https://generativelanguage.googleapis.com/'))
     throw new AppError('Gemini returned an invalid upload URL.', 502);
@@ -79,6 +99,8 @@ export async function uploadVideo(env: AppEnv['Bindings'], media: MediaRow, apiK
     const bytes = await part.arrayBuffer();
     if (bytes.byteLength !== length) throw new AppError(`Video read failed at byte ${offset}: incomplete stored chunk.`, 502);
     const final = offset + length === media.size;
+    const chunkStartedAt = Date.now();
+    logGemini('chunk_started', { traceId, offset, length, final });
     try {
       uploaded = await fetch(uploadUrl, {
         signal: AbortSignal.timeout(120_000),
@@ -99,14 +121,23 @@ export async function uploadVideo(env: AppEnv['Bindings'], media: MediaRow, apiK
       const message = error instanceof Error ? error.message : 'Unknown network failure';
       const timedOut = error instanceof Error && ['TimeoutError', 'AbortError'].includes(error.name);
       const detail = uploadError('transfer', new Response(null, { status: 502 }), { error: { message } }, apiKey, uploadUrl).message;
-      throw new AppError(`Gemini ${timedOut ? 'timed out' : 'connection failed'} at byte ${offset} of ${media.size}. ${detail}`, 502);
+      const failure = new AppError(`Gemini ${timedOut ? 'timed out' : 'connection failed'} at byte ${offset} of ${media.size}. ${detail}`, 502);
+      logGemini('chunk_failed', { traceId, offset, length, errorName: error instanceof Error ? error.name : 'UnknownError', error: failure.message, durationMs: Date.now() - chunkStartedAt });
+      throw failure;
     }
-    if (!uploaded.ok) throw uploadError('video transfer', uploaded, await uploaded.json().catch(() => null), apiKey, uploadUrl);
+    if (!uploaded.ok) {
+      const responseBody = await uploaded.json().catch(() => null);
+      const error = uploadError('video transfer', uploaded, responseBody, apiKey, uploadUrl);
+      logGemini('chunk_rejected', { traceId, offset, length, status: uploaded.status, error: error.message, durationMs: Date.now() - chunkStartedAt });
+      throw error;
+    }
+    logGemini('chunk_completed', { traceId, offset, length, status: uploaded.status, durationMs: Date.now() - chunkStartedAt });
     // Consume intermediate responses to release connections before the next chunk.
     if (!final) await uploaded.arrayBuffer();
   }
   const result: any = await uploaded.json().catch(() => ({}));
   if (!/^files\/[a-zA-Z0-9_-]+$/.test(result.file?.name || '')) throw new AppError(`Gemini upload completed (HTTP ${uploaded.status}) but returned no valid file reference. Please try again.`, 502);
+  logGemini('upload_completed', { traceId, sizeBytes: media.size, durationMs: Date.now() - startedAt, providerState: result.file.state });
   return result.file as { name: string; uri: string; mimeType: string; state?: string };
 }
 
@@ -121,13 +152,16 @@ gemini.post('/suggest', async (c) => {
   const apiKey = credential?.value?.apiKey;
   if (!apiKey) throw new AppError('Add your Gemini API key in Settings before generating suggestions.');
 
-  const file = await uploadVideo(c.env, media, apiKey);
+  const traceId = crypto.randomUUID();
+  logGemini('analysis_started', { traceId, mediaId: media.id, format: value.youtubeFormat, sizeBytes: media.size, mimeType: media.mime });
+  const file = await uploadVideo(c.env, media, apiKey, traceId);
   try {
     let current = file;
     for (let attempt = 0; current.state !== 'ACTIVE' && attempt < 20; attempt++) {
       if (current.state === 'FAILED') throw new AppError('Gemini could not process this video.', 502);
       await new Promise((resolve) => setTimeout(resolve, 2000));
       current = await googleJson(`https://generativelanguage.googleapis.com/v1beta/${file.name}`, apiKey);
+      logGemini('file_processing', { traceId, attempt: attempt + 1, state: current.state });
     }
     if (current.state !== 'ACTIVE') throw new AppError('Video processing took too long. Try again with a shorter video.', 504);
     const formatGuidance = value.youtubeFormat === 'short'
@@ -158,15 +192,18 @@ gemini.post('/suggest', async (c) => {
         }),
       },
     );
+    logGemini('generation_completed', { traceId, candidateCount: generated?.candidates?.length || 0, promptFeedback: generated?.promptFeedback?.blockReason || null });
     const text = generated?.candidates?.[0]?.content?.parts?.filter((part: any) => !part.thought).map((part: any) => part.text || '').join('');
     if (!text) throw new AppError('Gemini returned no suggestions.', 502);
     let suggestions;
     try { suggestions = suggestionsSchema.parse(JSON.parse(text)); }
     catch { throw new AppError('Gemini returned invalid suggestions. Please try again.', 502); }
+    logGemini('analysis_completed', { traceId, titleCount: suggestions.titles.length, descriptionLength: suggestions.description.length });
     return c.json(suggestions);
   } catch (error) {
-    if (error instanceof AppError) throw error;
-    throw new AppError('Gemini analysis could not finish. Please try again.', 502);
+    const failure = error instanceof AppError ? error : new AppError('Gemini analysis could not finish. Please try again.', 502);
+    logGemini('analysis_failed', { traceId, errorName: error instanceof Error ? error.name : 'UnknownError', error: failure.message });
+    throw failure;
   } finally {
     c.executionCtx.waitUntil(
       fetch(`https://generativelanguage.googleapis.com/v1beta/${file.name}`, {
