@@ -117,53 +117,6 @@ async function facebookSecrets() {
   return grant;
 }
 
-async function waitForInstagramContainer(containerId: string, token: string) {
-  for (let attempt = 0; attempt < 75; attempt++) {
-    const status = await fetchJson<{ status_code?: string; status?: string }>(`${graph(`/${containerId}`)}?${new URLSearchParams({
-      fields: 'status_code,status',
-      access_token: token
-    })}`);
-    const code = status.status_code || status.status;
-    if (code === 'FINISHED' || code === 'PUBLISHED') return;
-    if (code === 'ERROR' || code === 'EXPIRED') throw new Error(`Instagram media processing failed (${code}).`);
-    await new Promise((resolve) => setTimeout(resolve, 4000));
-  }
-  throw new Error('Instagram media processing timed out. Try publishing again in a few minutes.');
-}
-
-export async function publishInstagram(input: {
-  mediaUrl: string;
-  mimeType: string;
-  caption: string;
-}) {
-  const meta = await facebookSecrets();
-  const igId = meta.instagramBusinessId;
-  if (!igId) throw new Error('No Instagram Professional account is linked to the connected Facebook Page.');
-
-  const isVideo = input.mimeType.startsWith('video/');
-  const createBody = form({
-    ...(isVideo
-      ? { media_type: 'REELS', video_url: input.mediaUrl, share_to_feed: true }
-      : { image_url: input.mediaUrl }),
-    caption: input.caption.slice(0, 2200),
-    access_token: meta.pageAccessToken
-  });
-
-  const created = await fetchJson<{ id: string }>(graph(`/${igId}/media`), {
-    method: 'POST',
-    headers: { 'content-type': 'application/x-www-form-urlencoded' },
-    body: createBody
-  });
-
-  await waitForInstagramContainer(created.id, meta.pageAccessToken);
-  const published = await fetchJson<{ id: string }>(graph(`/${igId}/media_publish`), {
-    method: 'POST',
-    headers: { 'content-type': 'application/x-www-form-urlencoded' },
-    body: form({ creation_id: created.id, access_token: meta.pageAccessToken })
-  });
-  return { id: published.id };
-}
-
 export async function publishFacebook(input: {
   mediaUrl: string;
   mimeType: string;
