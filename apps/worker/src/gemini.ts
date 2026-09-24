@@ -40,7 +40,14 @@ async function googleJson(url: string, apiKey: string, init?: RequestInit) {
   });
   const body: any = await response.json().catch(() => ({}));
   if (!response.ok) {
-    const message = response.status === 429 ? 'Gemini quota exceeded. Check your Google AI billing and quota, then try again.' : `Gemini request failed (${response.status}). Check your API key, model access and video format.`;
+    let detail = typeof body?.error?.message === 'string' ? body.error.message : '';
+    detail = detail.split(apiKey).join('[redacted]')
+      .replace(/https?:\/\/[^\s"<>]+/g, '[URL redacted]')
+      .replace(/AIza[\w-]+/g, '[key redacted]')
+      .slice(0, 400);
+    const message = response.status === 429
+      ? 'Gemini quota exceeded. Check your Google AI billing and quota, then try again.'
+      : `Gemini request failed (HTTP ${response.status}). ${detail || 'Check the Gemini API key and model access.'}`;
     throw new AppError(message, response.status === 401 || response.status === 403 ? 400 : 502);
   }
   return body;
@@ -168,7 +175,7 @@ gemini.post('/suggest', async (c) => {
       ? 'This is intended as a YouTube Short. Use a punchy title, front-load the hook, and keep it concise.'
       : 'This is intended as a standard YouTube video. Optimize for search intent without clickbait.';
     const generated = await googleJson(
-      'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent',
+      'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent',
       apiKey,
       {
         method: 'POST',
