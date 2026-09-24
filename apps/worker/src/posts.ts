@@ -197,7 +197,11 @@ api.get('/accounts', async (c) => {
     accounts,
     readiness: {
       googleConfigured: !!(c.env.GOOGLE_CLIENT_ID && c.env.GOOGLE_CLIENT_SECRET),
-      metaConfigured: !!(c.env.META_APP_ID && c.env.META_APP_SECRET),
+      facebookConfigured: !!(
+        (c.env.FACEBOOK_APP_ID || c.env.META_APP_ID) &&
+        (c.env.FACEBOOK_APP_SECRET || c.env.META_APP_SECRET)
+      ),
+      instagramConfigured: !!(c.env.INSTAGRAM_APP_ID && c.env.INSTAGRAM_APP_SECRET),
       publicMediaUrlConfigured: c.env.APP_ORIGIN.startsWith('https://'),
       publicBaseUrl: c.env.APP_ORIGIN,
     },
