@@ -137,7 +137,14 @@ describe('session and API boundaries', () => {
     vi.mocked(fetch).mockImplementation(async (input: any, init: any) => {
       const url = String(input); calls.push(`${init?.method || 'GET'} ${url}`);
       if (url.endsWith('/upload/v1beta/files')) return new Response('{}', { headers: { 'X-Goog-Upload-URL': 'https://generativelanguage.googleapis.com/upload/session' } });
-      if (url.endsWith('/upload/session')) return Response.json({ file: { name: 'files/testvideo', state: 'PROCESSING' } });
+      if (url.endsWith('/upload/session')) {
+        const headers = new Headers(init.headers);
+        expect(headers.get('Content-Length')).toBe(String(media.size));
+        expect(headers.get('Content-Type')).toBe('video/mp4');
+        expect(headers.get('x-goog-api-key')).toBe('test-gemini-secret');
+        expect(new Uint8Array(await new Response(init.body).arrayBuffer())).toEqual(new Uint8Array([1, 2, 3, 4]));
+        return Response.json({ file: { name: 'files/testvideo', state: 'PROCESSING' } });
+      }
       if (init?.method === 'DELETE') return Response.json({});
       if (url.endsWith('/files/testvideo')) return Response.json({ name: 'files/testvideo', state: 'ACTIVE', uri: 'https://generativelanguage.googleapis.com/v1beta/files/testvideo', mimeType: 'video/mp4' });
       expect(JSON.parse(init.body).contents[0].parts[0].fileData.mimeType).toBe('video/mp4');
@@ -159,6 +166,24 @@ describe('session and API boundaries', () => {
       expect(response.status).toBe(201);
       expect((await response.json() as any).youtubeFormat).toBe('short');
     }
+  });
+  it('reports Google upload rejection details without exposing credentials or session URLs', async () => {
+    const { media } = await seed();
+    const apiKey = 'test-gemini-secret';
+    const uploadUrl = 'https://generativelanguage.googleapis.com/upload/session?upload_id=secret';
+    await saveCredential(e, user, 'gemini', { apiKey });
+    vi.mocked(fetch).mockImplementation(async () => {
+      if (vi.mocked(fetch).mock.calls.length === 1) return new Response('{}', { headers: { 'X-Goog-Upload-URL': uploadUrl } });
+      // Reject before consuming the body, as an upstream server can do.
+      return Response.json({ error: { message: `Invalid upload length for ${uploadUrl} with ${apiKey}` } }, { status: 400 });
+    });
+    const response = await call('/api/ai/suggest', 'POST', { mediaId: media.id });
+    expect(response.status).toBe(502);
+    const body = await response.text();
+    expect(body).toContain('video transfer failed (HTTP 400)');
+    expect(body).toContain('Invalid upload length');
+    expect(body).not.toContain(apiKey);
+    expect(body).not.toContain('upload_id=secret');
   });
   it('denies unauthenticated access with JSON, not SPA HTML', async () => {
     const response = await call('/api/posts', 'GET', undefined, false);

@@ -16,6 +16,18 @@ const suggestionsSchema = z.object({
   description: z.string().trim().min(1).max(5000),
 });
 
+function uploadError(stage: string, response: Response, body: any, apiKey: string, uploadUrl = '') {
+  // Never echo upload-session URLs or credentials from provider error messages.
+  let detail = typeof body?.error?.message === 'string' ? body.error.message : '';
+  for (const secret of [apiKey, uploadUrl].filter(Boolean)) detail = detail.split(secret).join('[redacted]');
+  detail = detail.replace(/https?:\/\/[^\s"<>]+/g, '[URL redacted]').replace(/AIza[\w-]+/g, '[key redacted]').slice(0, 400);
+  const hint = response.status === 429 ? 'Check Google AI quota and billing.'
+    : [401, 403].includes(response.status) ? 'Check the Gemini API key and its API restrictions.'
+    : response.status === 411 ? 'Google requires a fixed-length upload body.'
+    : 'Try again; if this persists, check the video format.';
+  return new AppError(`Gemini ${stage} failed (HTTP ${response.status}). ${detail || hint}`, 502);
+}
+
 async function googleJson(url: string, apiKey: string, init?: RequestInit) {
   const response = await fetch(url, {
     ...init,
@@ -32,6 +44,9 @@ async function googleJson(url: string, apiKey: string, init?: RequestInit) {
 
 async function uploadVideo(env: AppEnv['Bindings'], media: MediaRow, apiKey: string) {
   if (media.size > 2 * 1024 ** 3) throw new AppError('Gemini video analysis supports files up to 2 GB.');
+  const object = await env.MEDIA.get(media.object_key);
+  if (!object?.body) throw new AppError('Uploaded video could not be found.', 404);
+  if (object.size !== media.size) throw new AppError('Stored video size does not match the upload record. Upload the video again.');
   const start = await fetch('https://generativelanguage.googleapis.com/upload/v1beta/files', {
     signal: AbortSignal.timeout(30_000),
     method: 'POST',
@@ -45,24 +60,46 @@ async function uploadVideo(env: AppEnv['Bindings'], media: MediaRow, apiKey: str
     },
     body: JSON.stringify({ file: { displayName: media.name } }),
   });
-  if (!start.ok) throw new AppError('Gemini could not start the video upload. Check the API key and quota.', 502);
+  if (!start.ok) throw uploadError('upload initialization', start, await start.json().catch(() => null), apiKey);
   const uploadUrl = start.headers.get('X-Goog-Upload-URL');
   if (!uploadUrl?.startsWith('https://generativelanguage.googleapis.com/'))
     throw new AppError('Gemini returned an invalid upload URL.', 502);
-  const object = await env.MEDIA.get(media.object_key);
-  if (!object?.body) throw new AppError('Uploaded video could not be found.', 404);
-  const uploaded = await fetch(uploadUrl, {
-    signal: AbortSignal.timeout(120_000),
-    method: 'POST',
-    headers: {
-      'Content-Length': String(media.size),
-      'X-Goog-Upload-Offset': '0',
-      'X-Goog-Upload-Command': 'upload, finalize',
-    },
-    body: object.body,
-  });
+  // Workers derives Content-Length from the body, not a manually set header.
+  // A fixed-length stream keeps large videos out of memory and enforces the size.
+  const stream = new FixedLengthStream(object.size);
+  const controller = new AbortController();
+  const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(120_000)]);
+  const transfer = object.body.pipeTo(stream.writable, { signal });
+  // Attach immediately so an early fetch failure cannot leave an unhandled rejection.
+  void transfer.catch(() => undefined);
+  let uploaded: Response;
+  try {
+    uploaded = await fetch(uploadUrl, {
+      signal,
+      redirect: 'error',
+      method: 'POST',
+      headers: {
+        'x-goog-api-key': apiKey,
+        'Content-Type': media.mime,
+        'Content-Length': String(object.size),
+        'X-Goog-Upload-Offset': '0',
+        'X-Goog-Upload-Command': 'upload, finalize',
+      },
+      body: stream.readable,
+    });
+    if (!uploaded.ok) {
+      const error = uploadError('video transfer', uploaded, await uploaded.json().catch(() => null), apiKey, uploadUrl);
+      controller.abort();
+      throw error;
+    }
+    await transfer;
+  } catch (error) {
+    controller.abort();
+    if (error instanceof AppError) throw error;
+    throw new AppError('Gemini video transfer was interrupted or timed out. Please try again.', 502);
+  }
   const result: any = await uploaded.json().catch(() => ({}));
-  if (!uploaded.ok || !/^files\/[a-zA-Z0-9_-]+$/.test(result.file?.name || '')) throw new AppError('Gemini could not upload the video.', 502);
+  if (!/^files\/[a-zA-Z0-9_-]+$/.test(result.file?.name || '')) throw new AppError(`Gemini upload completed (HTTP ${uploaded.status}) but returned no valid file reference. Please try again.`, 502);
   return result.file as { name: string; uri: string; mimeType: string; state?: string };
 }
 
