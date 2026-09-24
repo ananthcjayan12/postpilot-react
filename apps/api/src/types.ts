@@ -64,6 +64,20 @@ export interface SecretShape {
     refreshToken?: string;
     expiryDate?: number;
   };
+  facebook?: {
+    userAccessToken: string;
+    pageAccessToken: string;
+    pageId: string;
+    pageName?: string;
+  };
+  instagram?: {
+    accessToken: string;
+    userId: string;
+    username?: string;
+    expiryDate?: number;
+    connectedAt?: string;
+  };
+  // Legacy combined Meta grant; Facebook publishing can still read this during migration.
   meta?: {
     userAccessToken: string;
     pageAccessToken: string;
