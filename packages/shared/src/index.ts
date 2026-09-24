@@ -1,6 +1,18 @@
 import { z } from 'zod';
 export const platformSchema = z.enum(['youtube', 'instagram', 'facebook']);
 export type Platform = z.infer<typeof platformSchema>;
+export const videoMetadataSchema = z.object({
+  width: z.number().int().positive(),
+  height: z.number().int().positive(),
+  duration: z.number().positive().finite(),
+});
+export type VideoMetadata = z.infer<typeof videoMetadataSchema>;
+export function shortsEligibility(metadata?: VideoMetadata): string | null {
+  if (!metadata) return 'Video dimensions and duration could not be read. Choose a playable video to check Shorts eligibility.';
+  if (metadata.width > metadata.height) return 'Shorts require a square or vertical frame. Export this video in portrait format; vertical footage inside a landscape frame does not qualify.';
+  if (metadata.duration > 180) return 'Shorts must be 3 minutes or less. Trim the video before uploading as a Short.';
+  return null;
+}
 export const postInput = z.object({
   title: z.string().trim().min(1).max(100),
   caption: z.string().max(5000).default(''),
@@ -12,6 +24,8 @@ export const postInput = z.object({
     .transform((p) => [...new Set(p)]),
   action: z.enum(['draft', 'schedule', 'publish']),
   scheduledFor: z.string().datetime().optional(),
+  youtubeFormat: z.enum(['video', 'short']).default('video'),
+  videoMetadata: videoMetadataSchema.optional(),
 });
 export const settingsInput = z.object({
   youtube: z.boolean(),
@@ -20,6 +34,7 @@ export const settingsInput = z.object({
   notify: z.boolean(),
   confirm: z.boolean(),
   schedulerEnabled: z.boolean().default(true),
+  geminiApiKey: z.string().trim().min(10).max(500).nullable().optional(),
 });
 export const defaultSettings = {
   youtube: true,

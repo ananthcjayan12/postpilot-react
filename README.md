@@ -30,6 +30,14 @@ Push to `main` after configuring GitHub secrets/variables. The deployment workfl
 
 No production deployment or real provider publishing is implied by a successful local build. Test those using your own configured account. The UI reports publishing asynchronously, and uncertain external outcomes are held for review to avoid duplicates.
 
+### Gemini video suggestions
+
+In Settings, save a Gemini API key from Google AI Studio. The Cloudflare runtime encrypts it in the credentials store; settings responses only report whether it is configured. Leave the field blank to keep the key, enter a replacement, or select removal before saving.
+
+Upload a video in the composer, then click **Suggest titles & description**. PostPilot sends the video to Google's Files API and uses Gemini 2.5 Flash to suggest five titles and a description. Select a title or use the description to apply it; existing text is not automatically overwritten. Requests use your Google quota and may incur charges. Videos are limited to 2 GB for analysis, and unusually slow processing returns a timeout. The temporary Google file is deleted on a best-effort basis after analysis; your original upload remains in R2. This feature is available in the current Cloudflare runtime, not the legacy Express server.
+
+Implementation follows Google's [video understanding documentation](https://ai.google.dev/gemini-api/docs/video-understanding). Local tests mock Google; live analysis requires your configured key.
+
 ---
 
 ## Legacy local Express instructions

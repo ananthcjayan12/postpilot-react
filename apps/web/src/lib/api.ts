@@ -9,6 +9,7 @@ export type Settings = {
   confirm: boolean;
   notify: boolean;
   schedulerEnabled: boolean;
+  geminiConfigured: boolean;
 };
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
@@ -53,13 +54,18 @@ export const api = {
     location.assign('/login');
   },
   settings: () => request<Settings>('/api/settings'),
-  saveSettings: (value: Settings) =>
+  saveSettings: (value: Settings & { geminiApiKey?: string | null }) =>
     request<Settings>('/api/settings', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(value),
     }),
   posts: () => request<PostRecord[]>('/api/posts'),
+  suggestMetadata: (mediaId: string, youtubeFormat: 'video' | 'short') =>
+    request<{ titles: string[]; description: string }>('/api/ai/suggest', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mediaId, youtubeFormat }),
+    }),
   media: () => request<MediaAsset[]>('/api/media'),
   accounts: () => request<AccountsResponse>('/api/accounts'),
   analytics: () => request<any>('/api/analytics'),
@@ -133,6 +139,8 @@ export const api = {
     platforms: Platform[];
     action: 'draft' | 'schedule' | 'publish';
     scheduledFor?: string;
+    youtubeFormat?: 'video' | 'short';
+    videoMetadata?: { width: number; height: number; duration: number };
   }) =>
     request<PostRecord>('/api/posts', {
       method: 'POST',

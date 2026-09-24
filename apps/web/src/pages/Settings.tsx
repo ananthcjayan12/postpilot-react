@@ -1,4 +1,4 @@
-import { BellRing, Database, Save, Shield, TimerReset } from 'lucide-react';
+import { BellRing, Database, Save, Shield, Sparkles, TimerReset } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
 
@@ -10,24 +10,31 @@ export function Settings() {
     notify: true,
     confirm: true,
     schedulerEnabled: true,
+    geminiConfigured: false,
   });
+  const [geminiApiKey, setGeminiApiKey] = useState('');
+  const [removeKey, setRemoveKey] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   useEffect(() => {
     void api
       .settings()
-      .then(setDefaults)
+      .then((value) => { setDefaults(value); setLoading(false); })
       .catch((e) => setError(e.message));
   }, []);
   const [error, setError] = useState('');
   const save = async () => {
+    setSaving(true);
     try {
-      await api.saveSettings(defaults);
+      setDefaults(await api.saveSettings({ ...defaults, geminiApiKey: removeKey ? null : geminiApiKey.trim() || undefined }));
+      setGeminiApiKey(''); setRemoveKey(false);
       setSaved(true);
       setError('');
       setTimeout(() => setSaved(false), 1800);
     } catch (e: any) {
       setError(e.message);
-    }
+    } finally { setSaving(false); }
   };
   return (
     <>
@@ -38,11 +45,21 @@ export function Settings() {
           <h1>Settings</h1>
           <p>Workspace defaults and publishing guardrails.</p>
         </div>
-        <button className="btn primary" onClick={save}>
-          <Save size={16} /> {saved ? 'Saved' : 'Save changes'}
+        <button className="btn primary" onClick={save} disabled={loading || saving}>
+          <Save size={16} /> {saving ? 'Saving…' : saved ? 'Saved' : 'Save changes'}
         </button>
       </div>
       <div className="settings-grid">
+        <section className="panel settings-card wide-card">
+          <div className="settings-icon purple"><Sparkles /></div>
+          <div className="settings-content">
+            <h2>Gemini video analysis</h2>
+            <p>Analyze your video to suggest five SEO-friendly titles and a description. Your key is stored encrypted and never returned to the browser.</p>
+            <label className="field"><span>Gemini API key {defaults.geminiConfigured ? '(configured)' : ''}</span><input className="input" type="password" autoComplete="new-password" disabled={loading || saving || removeKey} value={geminiApiKey} onChange={(event) => setGeminiApiKey(event.target.value)} placeholder={defaults.geminiConfigured ? 'Leave blank to keep the current key' : 'Enter your Gemini API key'} /></label>
+            <a className="inline-link" href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer">Get a key from Google AI Studio ↗</a>
+            {defaults.geminiConfigured && <Toggle label="Remove saved key when saving" checked={removeKey} onChange={setRemoveKey} />}
+          </div>
+        </section>
         <section className="panel settings-card">
           <div className="settings-icon">
             <TimerReset />

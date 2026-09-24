@@ -107,6 +107,59 @@ async function seed(platform = 'youtube') {
   };
 }
 describe('session and API boundaries', () => {
+  it('encrypts the Gemini key, preserves it on ordinary saves, and removes it explicitly', async () => {
+    const preferences = { youtube: true, instagram: false, facebook: false, notify: true, confirm: true, schedulerEnabled: true };
+    const key = 'test-gemini-secret-key';
+    const saved = await call('/api/settings', 'PUT', { ...preferences, geminiApiKey: key });
+    expect(saved.status).toBe(200);
+    expect(await saved.text()).not.toContain(key);
+    const row: any = await e.DB.prepare("SELECT envelope FROM credentials WHERE user_id=? AND provider='gemini'").bind(user).first();
+    expect(row.envelope).not.toContain(key);
+    expect((await unseal(e, row.envelope, `${user}:gemini`)).apiKey).toBe(key);
+    await call('/api/settings', 'PUT', preferences);
+    expect((await (await call('/api/settings')).json() as any).geminiConfigured).toBe(true);
+    const settings: any = await e.DB.prepare('SELECT data FROM settings WHERE user_id=?').bind(user).first();
+    expect(settings.data).not.toContain(key);
+    await call('/api/settings', 'PUT', { ...preferences, geminiApiKey: null });
+    expect((await (await call('/api/settings')).json() as any).geminiConfigured).toBe(false);
+  });
+  it('requires a saved key and rejects media not owned by the caller', async () => {
+    const { media } = await seed();
+    expect((await call('/api/ai/suggest', 'POST', { mediaId: media.id })).status).toBe(400);
+    expect((await call('/api/ai/suggest', 'POST', { mediaId: crypto.randomUUID() })).status).toBe(400);
+    expect((await call('/api/ai/suggest', 'POST', { mediaId: media.id }, false)).status).toBe(401);
+  });
+  it('uploads video, polls processing, generates validated suggestions and deletes the temporary file', async () => {
+    const { media } = await seed();
+    await saveCredential(e, user, 'gemini', { apiKey: 'test-gemini-secret' });
+    const suggestions = { titles: ['One', 'Two', 'Three', 'Four', 'Five'], description: 'Video description' };
+    const calls: string[] = [];
+    vi.mocked(fetch).mockImplementation(async (input: any, init: any) => {
+      const url = String(input); calls.push(`${init?.method || 'GET'} ${url}`);
+      if (url.endsWith('/upload/v1beta/files')) return new Response('{}', { headers: { 'X-Goog-Upload-URL': 'https://generativelanguage.googleapis.com/upload/session' } });
+      if (url.endsWith('/upload/session')) return Response.json({ file: { name: 'files/testvideo', state: 'PROCESSING' } });
+      if (init?.method === 'DELETE') return Response.json({});
+      if (url.endsWith('/files/testvideo')) return Response.json({ name: 'files/testvideo', state: 'ACTIVE', uri: 'https://generativelanguage.googleapis.com/v1beta/files/testvideo', mimeType: 'video/mp4' });
+      expect(JSON.parse(init.body).contents[0].parts[0].fileData.mimeType).toBe('video/mp4');
+      return Response.json({ candidates: [{ content: { parts: [{ text: JSON.stringify(suggestions) }] } }] });
+    });
+    const response = await call('/api/ai/suggest', 'POST', { mediaId: media.id });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual(suggestions);
+    expect(calls.at(-1)).toBe('DELETE https://generativelanguage.googleapis.com/v1beta/files/testvideo');
+  });
+  it('validates Shorts dimensions and duration and retains the selected format', async () => {
+    const { media } = await seed();
+    const input = { title: 'Portrait clip', mediaId: media.id, platforms: ['youtube'], action: 'draft', youtubeFormat: 'short' };
+    for (const videoMetadata of [undefined, { width: 1920, height: 1080, duration: 30 }, { width: 1080, height: 1920, duration: 180.1 }]) {
+      expect((await call('/api/posts', 'POST', { ...input, videoMetadata })).status).toBe(400);
+    }
+    for (const width of [1080, 1920]) {
+      const response = await call('/api/posts', 'POST', { ...input, videoMetadata: { width, height: 1920, duration: 180 } });
+      expect(response.status).toBe(201);
+      expect((await response.json() as any).youtubeFormat).toBe('short');
+    }
+  });
   it('denies unauthenticated access with JSON, not SPA HTML', async () => {
     const response = await call('/api/posts', 'GET', undefined, false);
     expect(response.status).toBe(401);
@@ -287,6 +340,7 @@ describe('durable publishing boundaries', () => {
     await e.DB.prepare("UPDATE targets SET status='uploading',data=? WHERE post_id=?")
       .bind(
         JSON.stringify({
+          youtubeFormat: 'short',
           session: await seal(
             e,
             'https://www.googleapis.com/upload/resume-test',
@@ -301,6 +355,8 @@ describe('durable publishing boundaries', () => {
     const row: any = await e.DB.prepare('SELECT * FROM targets WHERE post_id=?').bind(post.id).first();
     expect(row.status).toBe('success');
     expect(JSON.parse(row.data).id).toBe('video123');
+    expect(JSON.parse(row.data).youtubeFormat).toBe('short');
+    expect(JSON.parse(row.data).url).toBe('https://www.youtube.com/shorts/video123');
     expect(await youtubeChunk(e, post, media)).toBe(true);
   });
   it('does not repeat an uncertain Facebook side effect', async () => {

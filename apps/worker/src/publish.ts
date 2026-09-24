@@ -107,7 +107,11 @@ export async function youtubeChunk(env: Env, post: PostRow, media: MediaRow) {
           'X-Upload-Content-Type': media.mime,
         },
         body: JSON.stringify({
-          snippet: { title: post.title, description: post.caption, categoryId: '22' },
+          snippet: {
+            title: post.title,
+            description: post.caption,
+            categoryId: '22',
+          },
           status: { privacyStatus: 'public', selfDeclaredMadeForKids: false },
         }),
       },
@@ -133,8 +137,9 @@ export async function youtubeChunk(env: Env, post: PostRow, media: MediaRow) {
     const result: any = await probe.json();
     if (!result.id) throw new ReviewError('Upload completed without a retrievable video ID.');
     await save(env, post.id, 'youtube', 'success', {
+      youtubeFormat: t.value.youtubeFormat || 'video',
       id: result.id,
-      url: `https://www.youtube.com/watch?v=${result.id}`,
+      url: t.value.youtubeFormat === 'short' ? `https://www.youtube.com/shorts/${result.id}` : `https://www.youtube.com/watch?v=${result.id}`,
     });
     return true;
   }
@@ -165,8 +170,9 @@ export async function youtubeChunk(env: Env, post: PostRow, media: MediaRow) {
   const result = await checked(response);
   if (!result.id) throw new ReviewError('YouTube result is missing an ID.');
   await save(env, post.id, 'youtube', 'success', {
+    youtubeFormat: t.value.youtubeFormat || 'video',
     id: result.id,
-    url: `https://www.youtube.com/watch?v=${result.id}`,
+    url: t.value.youtubeFormat === 'short' ? `https://www.youtube.com/shorts/${result.id}` : `https://www.youtube.com/watch?v=${result.id}`,
   });
   return true;
 }

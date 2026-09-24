@@ -1,8 +1,8 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { postInput, settingsInput, defaultSettings } from '@postpilot/shared';
+import { postInput, settingsInput, defaultSettings, shortsEligibility } from '@postpilot/shared';
 import type { AppEnv, Env, PostRow, Target } from './env';
-import { AppError, now } from './lib';
+import { AppError, getCredential, now, saveCredential } from './lib';
 import { requireSession } from './auth';
 export const api = new Hono<AppEnv>();
 api.use('*', requireSession);
@@ -10,6 +10,8 @@ export async function postJson(env: Env, p: PostRow, suppliedTargets?: Target[])
   const targets =
     suppliedTargets ||
     (await env.DB.prepare('SELECT * FROM targets WHERE post_id=?').bind(p.id).all<Target>()).results;
+  const youtubeTarget = targets.find((target) => target.platform === 'youtube');
+  const youtubeData = youtubeTarget ? JSON.parse(youtubeTarget.data) : {};
   return {
     id: p.id,
     title: p.title,
@@ -33,6 +35,7 @@ export async function postJson(env: Env, p: PostRow, suppliedTargets?: Target[])
           ];
         }),
     ),
+    youtubeFormat: youtubeData.youtubeFormat || 'video',
   };
 }
 api.get('/posts', async (c) => {
@@ -54,10 +57,15 @@ api.get('/posts', async (c) => {
 api.post('/posts', async (c) => {
   const v = postInput.parse(await c.req.json()),
     user = c.get('user').id;
-  const media = await c.env.DB.prepare('SELECT id FROM media WHERE id=? AND user_id=?')
+  const media = await c.env.DB.prepare('SELECT id,mime FROM media WHERE id=? AND user_id=?')
     .bind(v.mediaId, user)
-    .first();
+    .first<{ id: string; mime: string }>();
   if (!media) throw new AppError('Select an uploaded media asset.');
+  if (v.platforms.includes('youtube') && v.youtubeFormat === 'short') {
+    if (!media.mime.startsWith('video/')) throw new AppError('YouTube Shorts require a video.');
+    const error = shortsEligibility(v.videoMetadata);
+    if (error) throw new AppError(error);
+  }
   if (v.action === 'schedule' && (!v.scheduledFor || Date.parse(v.scheduledFor) <= Date.now()))
     throw new AppError('Choose a future schedule time.');
   const id = crypto.randomUUID(),
@@ -79,7 +87,11 @@ api.post('/posts', async (c) => {
       v.action === 'publish' ? 1 : 0,
     ),
     ...v.platforms.map((p) =>
-      c.env.DB.prepare('INSERT INTO targets(post_id,platform) VALUES(?,?)').bind(id, p),
+      c.env.DB.prepare('INSERT INTO targets(post_id,platform,data) VALUES(?,?,?)').bind(
+        id,
+        p,
+        JSON.stringify(p === 'youtube' ? { youtubeFormat: v.youtubeFormat } : {}),
+      ),
     ),
   ];
   if (v.action === 'publish')
@@ -264,16 +276,20 @@ api.get('/settings', async (c) => {
   const row = await c.env.DB.prepare('SELECT data FROM settings WHERE user_id=?')
     .bind(c.get('user').id)
     .first<{ data: string }>();
-  return c.json(row ? { ...defaultSettings, ...JSON.parse(row.data) } : defaultSettings);
+  const geminiConfigured = !!(await getCredential(c.env, c.get('user').id, 'gemini'));
+  return c.json({ ...(row ? { ...defaultSettings, ...JSON.parse(row.data) } : defaultSettings), geminiConfigured });
 });
 api.put('/settings', async (c) => {
   const value = settingsInput.parse(await c.req.json());
+  const { geminiApiKey, ...preferences } = value;
+  if (geminiApiKey) await saveCredential(c.env, c.get('user').id, 'gemini', { apiKey: geminiApiKey });
+  if (geminiApiKey === null) await c.env.DB.prepare('DELETE FROM credentials WHERE user_id=? AND provider=?').bind(c.get('user').id, 'gemini').run();
   await c.env.DB.prepare(
     'INSERT INTO settings(user_id,data) VALUES(?,?) ON CONFLICT(user_id) DO UPDATE SET data=excluded.data',
   )
-    .bind(c.get('user').id, JSON.stringify(value))
+    .bind(c.get('user').id, JSON.stringify(preferences))
     .run();
-  return c.json(value);
+  return c.json({ ...preferences, geminiConfigured: geminiApiKey ? true : !!(await getCredential(c.env, c.get('user').id, 'gemini')) });
 });
 export async function dispatch(env: Env) {
   const due = (

@@ -31,6 +31,7 @@ export interface PostRecord {
   results: Partial<Record<Platform, PublishResult>>;
   attempts: number;
   lastError?: string;
+  youtubeFormat?: 'video' | 'short';
 }
 
 export interface AccountInfo {

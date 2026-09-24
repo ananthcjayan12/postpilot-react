@@ -7,6 +7,7 @@ import { auth, requireSession } from './auth';
 import { oauth } from './oauth';
 import { media, mediaResponse, cleanupUploads } from './media';
 import { api, dispatch } from './posts';
+import { gemini } from './gemini';
 export { PublishPost } from './publish';
 export const app = new Hono<AppEnv>();
 app.use(
@@ -26,6 +27,7 @@ app.get('/health', (c) => c.json({ ok: true, service: 'postpilot-worker' }));
 app.route('/api/auth', auth);
 app.route('/api/oauth', oauth);
 app.route('/api/media', media);
+app.route('/api/ai', gemini);
 app.route('/api', api);
 app.on(['GET', 'HEAD'], '/media-files/:id', requireSession, (c) =>
   mediaResponse(c.req.raw, c.env, c.req.param('id')!, c.get('user').id),
