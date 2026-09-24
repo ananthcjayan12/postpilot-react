@@ -147,6 +147,6 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ outcome, remoteId, confirmation: 'I checked the provider account' }),
     }),
-  disconnect: (provider: 'google' | 'meta') =>
+  disconnect: (provider: 'google' | 'facebook' | 'instagram') =>
     request<{ ok: true }>(`/api/oauth/${provider}/disconnect`, { method: 'POST' }),
 };
