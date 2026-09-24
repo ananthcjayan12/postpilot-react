@@ -43,8 +43,9 @@ A local-first React + Node publishing studio inspired by the selected **PostPilo
 - Polished React/Vite UI: Dashboard, Create Post, Calendar, Content Library, Analytics, Connected Accounts, Settings, and Login/landing screen.
 - YouTube OAuth 2.0 connection using the official Google client library.
 - YouTube video uploads using the official YouTube Data API v3.
-- Meta OAuth connection for a Facebook Page and its linked Instagram Professional account.
-- Instagram image/Reel publishing through the official Instagram Graph API.
+- Independent Facebook OAuth connection for Facebook Page publishing.
+- Independent Instagram Login connection for Business/Creator accounts; no Facebook Page linkage is required for Instagram.
+- Instagram image/Reel publishing through the official Instagram API with Instagram Login.
 - Facebook Page image/video publishing through the official Pages/Video API.
 - Persistent local scheduler. Scheduled jobs survive API restarts.
 - Local media library and post state persisted on disk.
@@ -126,49 +127,71 @@ Google OAuth authorizations in **Testing** status expire after 7 days when non-b
 
 ---
 
-## 3. Instagram + Facebook connection
+## 3. Instagram and Facebook connections
 
-Your Instagram account must be **Business or Creator**, and it should be linked to the Facebook Page you want to publish to.
+Instagram and Facebook are now connected **independently**.
 
-### Meta developer setup
+### Instagram — direct Instagram Login
 
-1. Create a Meta developer app and add the two use cases **Manage everything on your Page** and **Manage messaging & content on Instagram**.
-2. Under **Manage Pages → Permissions and features**, make these permissions Ready for testing: `pages_show_list`, `pages_read_engagement`, and `pages_manage_posts`.
-3. Under **Instagram API**, choose **API setup with Facebook login** (not Instagram login). Enable `instagram_basic` and `instagram_content_publish`.
-4. Configure the Facebook login OAuth redirect URL:
+Use **Instagram API → API setup with Instagram login**. Enable only:
 
 ```text
-http://localhost:8787/api/oauth/meta/callback
+instagram_business_basic
+instagram_business_content_publish
 ```
 
-5. Keep your own Facebook account assigned to the app as an Administrator/Developer/Tester while using the app only for your own Page/account.
-6. Make sure your Facebook user has content-creation permissions on the Page and that the Instagram Professional account is linked to that Page.
-7. Put these values in `.env`:
+Register this callback for local legacy development:
+
+```text
+http://localhost:8787/api/oauth/instagram/callback
+```
+
+Production Cloudflare deployments use:
+
+```text
+https://YOUR-ORIGIN/api/oauth/instagram/callback
+```
+
+Store the Instagram Login app credentials separately:
 
 ```env
-META_APP_ID=...
-META_APP_SECRET=...
-META_REDIRECT_URI=http://localhost:8787/api/oauth/meta/callback
-META_GRAPH_VERSION=v25.0
+INSTAGRAM_APP_ID=...
+INSTAGRAM_APP_SECRET=...
 ```
 
-If your Facebook account manages several Pages, optionally pin one:
+This flow supports Instagram Business/Creator accounts directly and does not require a linked Facebook Page.
 
-```env
-META_PAGE_ID=1234567890
-```
+### Facebook — Page Login
 
-PostPilot requests:
+For Facebook Page publishing, enable:
 
 ```text
 pages_show_list
 pages_read_engagement
 pages_manage_posts
-instagram_basic
-instagram_content_publish
 ```
 
-PostPilot intentionally does **not** request `publish_video`, Instagram messaging, comment-management, insights, or Business Manager permissions. For an app used only by your own app-role account(s), Standard Access / Ready for testing is the intended setup. App Review becomes relevant when you want broader access for people outside the app roles.
+Register:
+
+```text
+http://localhost:8787/api/oauth/facebook/callback
+```
+
+and store:
+
+```env
+FACEBOOK_APP_ID=...
+FACEBOOK_APP_SECRET=...
+META_GRAPH_VERSION=v25.0
+```
+
+If the Facebook account manages several Pages, optionally set:
+
+```env
+META_PAGE_ID=1234567890
+```
+
+The older `META_APP_ID` / `META_APP_SECRET` names remain accepted as Facebook aliases for backwards compatibility.
 
 ---
 
@@ -215,7 +238,8 @@ http://localhost:5173/accounts
 Click:
 
 - **Connect YouTube** — Google OAuth
-- **Connect Facebook** / **Connect through Meta** — Meta OAuth; this also discovers the linked Instagram Professional account
+- **Connect Instagram** — direct Instagram OAuth for a Business/Creator account
+- **Connect Facebook** — Facebook OAuth for a Page
 
 The browser callbacks return to PostPilot and the tokens are stored in:
 

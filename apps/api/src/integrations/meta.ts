@@ -3,12 +3,10 @@ import { fetchJson } from '../lib/http.js';
 import { loadSecrets, mutateSecrets } from '../lib/secrets.js';
 import { mutateDb } from '../lib/store.js';
 
-export const META_SCOPES = [
+export const FACEBOOK_SCOPES = [
   'pages_show_list',
   'pages_read_engagement',
-  'pages_manage_posts',
-  'instagram_basic',
-  'instagram_content_publish'
+  'pages_manage_posts'
 ];
 
 const graph = (path: string) => `https://graph.facebook.com/${config.metaGraphVersion}/${path.replace(/^\//, '')}`;
@@ -21,19 +19,19 @@ function form(data: Record<string, string | number | boolean | undefined>) {
   return body;
 }
 
-export function metaLoginUrl(state: string) {
+export function facebookLoginUrl(state: string) {
   const params = new URLSearchParams({
-    client_id: requireEnv('metaAppId'),
-    redirect_uri: config.metaRedirectUri,
+    client_id: requireEnv('facebookAppId'),
+    redirect_uri: config.facebookRedirectUri,
     state,
     response_type: 'code',
     auth_type: 'rerequest',
-    scope: META_SCOPES.join(',')
+    scope: FACEBOOK_SCOPES.join(',')
   });
   return `https://www.facebook.com/${config.metaGraphVersion}/dialog/oauth?${params.toString()}`;
 }
 
-async function assertGrantedMetaPermissions(userAccessToken: string) {
+async function assertGrantedFacebookPermissions(userAccessToken: string) {
   const response = await fetchJson<{ data?: Array<{ permission: string; status: string }> }>(
     `${graph('/me/permissions')}?${new URLSearchParams({ access_token: userAccessToken })}`
   );
@@ -42,20 +40,20 @@ async function assertGrantedMetaPermissions(userAccessToken: string) {
       .filter((item) => item.status === 'granted')
       .map((item) => item.permission)
   );
-  const missing = META_SCOPES.filter((permission) => !granted.has(permission));
+  const missing = FACEBOOK_SCOPES.filter((permission) => !granted.has(permission));
   if (missing.length) {
     throw new Error(
-      `Meta did not grant the required permissions: ${missing.join(', ')}. ` +
-      'Make sure the Page permissions are Ready for testing and Instagram is configured with API setup with Facebook login, then reconnect.'
+      `Facebook did not grant the required permissions: ${missing.join(', ')}. ` +
+      'Make sure the Page permissions are Ready for testing, then reconnect.'
     );
   }
 }
 
-export async function exchangeMetaCode(code: string) {
+export async function exchangeFacebookCode(code: string) {
   const short = await fetchJson<{ access_token: string }>(`${graph('/oauth/access_token')}?${new URLSearchParams({
-    client_id: requireEnv('metaAppId'),
-    client_secret: requireEnv('metaAppSecret'),
-    redirect_uri: config.metaRedirectUri,
+    client_id: requireEnv('facebookAppId'),
+    client_secret: requireEnv('facebookAppSecret'),
+    redirect_uri: config.facebookRedirectUri,
     code
   })}`);
 
@@ -63,8 +61,8 @@ export async function exchangeMetaCode(code: string) {
   try {
     const long = await fetchJson<{ access_token: string }>(`${graph('/oauth/access_token')}?${new URLSearchParams({
       grant_type: 'fb_exchange_token',
-      client_id: requireEnv('metaAppId'),
-      client_secret: requireEnv('metaAppSecret'),
+      client_id: requireEnv('facebookAppId'),
+      client_secret: requireEnv('facebookAppSecret'),
       fb_exchange_token: short.access_token
     })}`);
     userAccessToken = long.access_token;
@@ -72,17 +70,16 @@ export async function exchangeMetaCode(code: string) {
     console.warn('Meta long-lived token exchange did not succeed; keeping short-lived token:', error);
   }
 
-  await assertGrantedMetaPermissions(userAccessToken);
+  await assertGrantedFacebookPermissions(userAccessToken);
 
   type Page = {
     id: string;
     name: string;
     access_token: string;
     tasks?: string[];
-    instagram_business_account?: { id: string; username?: string };
   };
   const pageList = await fetchJson<{ data: Page[] }>(`${graph('/me/accounts')}?${new URLSearchParams({
-    fields: 'id,name,access_token,tasks,instagram_business_account{id,username}',
+    fields: 'id,name,access_token,tasks',
     access_token: userAccessToken
   })}`);
 
@@ -90,25 +87,12 @@ export async function exchangeMetaCode(code: string) {
   const page = (config.metaPageId ? eligible.find((p) => p.id === config.metaPageId) : undefined) || eligible[0];
   if (!page) throw new Error('No Facebook Page with content-creation access was returned by Meta.');
 
-  let ig = page.instagram_business_account;
-  if (!ig) {
-    try {
-      const detail = await fetchJson<{ instagram_business_account?: { id: string; username?: string } }>(`${graph(`/${page.id}`)}?${new URLSearchParams({
-        fields: 'instagram_business_account{id,username}',
-        access_token: page.access_token
-      })}`);
-      ig = detail.instagram_business_account;
-    } catch {}
-  }
-
   await mutateSecrets((secrets) => {
-    secrets.meta = {
+    secrets.facebook = {
       userAccessToken,
       pageAccessToken: page.access_token,
       pageId: page.id,
-      pageName: page.name,
-      instagramBusinessId: ig?.id,
-      instagramUsername: ig?.username
+      pageName: page.name
     };
   });
 
@@ -121,75 +105,16 @@ export async function exchangeMetaCode(code: string) {
       detail: 'Facebook Page',
       connectedAt: new Date().toISOString()
     };
-    db.accounts.instagram = ig?.id ? {
-      platform: 'instagram',
-      connected: true,
-      displayName: ig.username ? `@${ig.username}` : 'Instagram Professional account',
-      accountId: ig.id,
-      secondaryId: page.id,
-      detail: 'Linked to Facebook Page',
-      connectedAt: new Date().toISOString()
-    } : {
-      platform: 'instagram',
-      connected: false,
-      detail: 'Connect a Professional Instagram account to this Page in Meta.'
-    };
   });
 }
 
-async function metaSecrets() {
+async function facebookSecrets() {
   const secrets = await loadSecrets();
-  if (!secrets.meta?.pageAccessToken || !secrets.meta.pageId) {
-    throw new Error('Facebook is not connected. Open Connected Accounts and connect Meta first.');
+  const grant = secrets.facebook || secrets.meta;
+  if (!grant?.pageAccessToken || !grant.pageId) {
+    throw new Error('Facebook is not connected. Open Connected Accounts and connect Facebook first.');
   }
-  return secrets.meta;
-}
-
-async function waitForInstagramContainer(containerId: string, token: string) {
-  for (let attempt = 0; attempt < 75; attempt++) {
-    const status = await fetchJson<{ status_code?: string; status?: string }>(`${graph(`/${containerId}`)}?${new URLSearchParams({
-      fields: 'status_code,status',
-      access_token: token
-    })}`);
-    const code = status.status_code || status.status;
-    if (code === 'FINISHED' || code === 'PUBLISHED') return;
-    if (code === 'ERROR' || code === 'EXPIRED') throw new Error(`Instagram media processing failed (${code}).`);
-    await new Promise((resolve) => setTimeout(resolve, 4000));
-  }
-  throw new Error('Instagram media processing timed out. Try publishing again in a few minutes.');
-}
-
-export async function publishInstagram(input: {
-  mediaUrl: string;
-  mimeType: string;
-  caption: string;
-}) {
-  const meta = await metaSecrets();
-  const igId = meta.instagramBusinessId;
-  if (!igId) throw new Error('No Instagram Professional account is linked to the connected Facebook Page.');
-
-  const isVideo = input.mimeType.startsWith('video/');
-  const createBody = form({
-    ...(isVideo
-      ? { media_type: 'REELS', video_url: input.mediaUrl, share_to_feed: true }
-      : { image_url: input.mediaUrl }),
-    caption: input.caption.slice(0, 2200),
-    access_token: meta.pageAccessToken
-  });
-
-  const created = await fetchJson<{ id: string }>(graph(`/${igId}/media`), {
-    method: 'POST',
-    headers: { 'content-type': 'application/x-www-form-urlencoded' },
-    body: createBody
-  });
-
-  await waitForInstagramContainer(created.id, meta.pageAccessToken);
-  const published = await fetchJson<{ id: string }>(graph(`/${igId}/media_publish`), {
-    method: 'POST',
-    headers: { 'content-type': 'application/x-www-form-urlencoded' },
-    body: form({ creation_id: created.id, access_token: meta.pageAccessToken })
-  });
-  return { id: published.id };
+  return grant;
 }
 
 export async function publishFacebook(input: {
@@ -198,7 +123,7 @@ export async function publishFacebook(input: {
   title: string;
   caption: string;
 }) {
-  const meta = await metaSecrets();
+  const meta = await facebookSecrets();
   if (input.mimeType.startsWith('image/')) {
     const published = await fetchJson<{ id: string; post_id?: string }>(graph(`/${meta.pageId}/photos`), {
       method: 'POST',
@@ -229,10 +154,9 @@ export async function publishFacebook(input: {
   return { id: published.id, url: `https://www.facebook.com/${published.id}` };
 }
 
-export async function disconnectMeta() {
-  await mutateSecrets((secrets) => { delete secrets.meta; });
+export async function disconnectFacebook() {
+  await mutateSecrets((secrets) => { delete secrets.facebook; });
   await mutateDb((db) => {
     db.accounts.facebook = { platform: 'facebook', connected: false };
-    db.accounts.instagram = { platform: 'instagram', connected: false };
   });
 }

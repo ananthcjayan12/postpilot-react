@@ -47,7 +47,8 @@ export interface AccountsResponse {
   accounts: Record<Platform, AccountInfo>;
   readiness: {
     googleConfigured: boolean;
-    metaConfigured: boolean;
+    facebookConfigured: boolean;
+    instagramConfigured: boolean;
     publicMediaUrlConfigured: boolean;
     publicBaseUrl: string | null;
   };

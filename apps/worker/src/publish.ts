@@ -2,7 +2,7 @@ import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from 'cloud
 import { NonRetryableError } from 'cloudflare:workflows';
 import type { Env, PostRow, MediaRow, Target } from './env';
 import { now, getCredential, signMedia, seal, unseal, AppError } from './lib';
-import { googleToken, graph } from './oauth';
+import { googleToken, facebookGraph, instagramGraph, instagramToken } from './oauth';
 const retry = {
   retries: {
     limit: 4,
@@ -58,13 +58,26 @@ async function checked(response: Response) {
     );
   return response.json() as Promise<any>;
 }
-async function readMeta(env: Env, path: string, token: string) {
-  return checked(await fetch(graph(env, path), { headers: { Authorization: `Bearer ${token}` } }));
+async function readFacebook(env: Env, path: string, token: string) {
+  return checked(
+    await fetch(facebookGraph(env, path), { headers: { Authorization: `Bearer ${token}` } }),
+  );
 }
-async function metaToken(env: Env, user: string) {
-  const grant = await getCredential(env, user, 'meta');
-  if (!grant) throw new NonRetryableError('Connect Meta before publishing.');
+async function readInstagram(env: Env, path: string, token: string) {
+  return checked(
+    await fetch(instagramGraph(env, path), { headers: { Authorization: `Bearer ${token}` } }),
+  );
+}
+async function facebookToken(env: Env, user: string) {
+  const grant =
+    (await getCredential(env, user, 'facebook')) || (await getCredential(env, user, 'meta'));
+  if (!grant) throw new NonRetryableError('Connect Facebook before publishing.');
   return grant.value;
+}
+async function instagramGrant(env: Env, user: string) {
+  const grant = await getCredential(env, user, 'instagram');
+  if (!grant) throw new NonRetryableError('Connect Instagram before publishing.');
+  return { ...grant.value, accessToken: await instagramToken(env, user) };
 }
 async function delivery(env: Env, id: string) {
   if (!env.APP_ORIGIN.startsWith('https://'))
@@ -160,8 +173,8 @@ export async function youtubeChunk(env: Env, post: PostRow, media: MediaRow) {
 async function createInstagram(env: Env, post: PostRow, media: MediaRow) {
   const t = await target(env, post.id, 'instagram');
   if (t.value.container || t.status === 'success') return;
-  const grant = await metaToken(env, post.user_id);
-  if (!grant.instagramBusinessId) throw new NonRetryableError('No Instagram Professional account is linked.');
+  const grant = await instagramGrant(env, post.user_id);
+  if (!grant.userId) throw new NonRetryableError('Instagram connection is missing an account ID.');
   // Container creation itself does not publish. An orphan can expire safely.
   const body = new URLSearchParams({
     caption: post.caption.slice(0, 2200),
@@ -170,9 +183,9 @@ async function createInstagram(env: Env, post: PostRow, media: MediaRow) {
       : { image_url: await delivery(env, media.id) }),
   });
   const result = await checked(
-    await fetch(graph(env, `${grant.instagramBusinessId}/media`), {
+    await fetch(instagramGraph(env, `${grant.userId}/media`), {
       method: 'POST',
-      headers: { Authorization: `Bearer ${grant.pageAccessToken}` },
+      headers: { Authorization: `Bearer ${grant.accessToken}` },
       body,
     }),
   );
@@ -182,16 +195,24 @@ async function createInstagram(env: Env, post: PostRow, media: MediaRow) {
 async function instagramStatus(env: Env, post: PostRow) {
   const t = await target(env, post.id, 'instagram');
   if (t.status === 'success') return 'PUBLISHED';
-  const g = await metaToken(env, post.user_id);
-  const result = await readMeta(env, `${t.value.container}?fields=status_code`, g.pageAccessToken);
+  const grant = await instagramGrant(env, post.user_id);
+  const result = await readInstagram(
+    env,
+    `${t.value.container}?fields=status_code`,
+    grant.accessToken,
+  );
   return String(result.status_code);
 }
 export async function publishInstagram(env: Env, post: PostRow) {
   const t = await target(env, post.id, 'instagram');
   if (t.status === 'success') return;
-  const grant = await metaToken(env, post.user_id);
+  const grant = await instagramGrant(env, post.user_id);
   if (t.status === 'sending') {
-    const state = await readMeta(env, `${t.value.container}?fields=status_code`, grant.pageAccessToken);
+    const state = await readInstagram(
+      env,
+      `${t.value.container}?fields=status_code`,
+      grant.accessToken,
+    );
     if (state.status_code === 'PUBLISHED') {
       await save(env, post.id, 'instagram', 'success', { ...t.value, reconciled: true });
       return;
@@ -201,9 +222,9 @@ export async function publishInstagram(env: Env, post: PostRow) {
     );
   }
   await save(env, post.id, 'instagram', 'sending', t.value);
-  const response = await fetch(graph(env, `${grant.instagramBusinessId}/media_publish`), {
+  const response = await fetch(instagramGraph(env, `${grant.userId}/media_publish`), {
     method: 'POST',
-    headers: { Authorization: `Bearer ${grant.pageAccessToken}` },
+    headers: { Authorization: `Bearer ${grant.accessToken}` },
     body: new URLSearchParams({ creation_id: t.value.container }),
   });
   if (response.status >= 400 && response.status < 500 && response.status !== 429) {
@@ -219,11 +240,11 @@ export async function publishFacebook(env: Env, post: PostRow, media: MediaRow) 
   if (t.status === 'success' || t.value.id) return;
   if (t.status === 'sending')
     throw new ReviewError('Facebook may have accepted this post. Verify the Page before publishing again.');
-  const g = await metaToken(env, post.user_id),
+  const g = await facebookToken(env, post.user_id),
     image = media.mime.startsWith('image/'),
     url = await delivery(env, media.id);
   await save(env, post.id, 'facebook', 'sending', t.value);
-  const response = await fetch(graph(env, `${g.pageId}/${image ? 'photos' : 'videos'}`), {
+  const response = await fetch(facebookGraph(env, `${g.pageId}/${image ? 'photos' : 'videos'}`), {
     method: 'POST',
     headers: { Authorization: `Bearer ${g.pageAccessToken}` },
     body: new URLSearchParams(
@@ -247,8 +268,8 @@ export async function publishFacebook(env: Env, post: PostRow, media: MediaRow) 
 async function facebookStatus(env: Env, post: PostRow) {
   const t = await target(env, post.id, 'facebook');
   if (t.status === 'success') return true;
-  const g = await metaToken(env, post.user_id);
-  const r = await readMeta(env, `${t.value.id}?fields=status`, g.pageAccessToken);
+  const g = await facebookToken(env, post.user_id);
+  const r = await readFacebook(env, `${t.value.id}?fields=status`, g.pageAccessToken);
   if (r.status?.video_status === 'error') throw new NonRetryableError('Facebook video processing failed.');
   if (r.status?.video_status === 'ready') {
     await save(env, post.id, 'facebook', 'success', t.value);

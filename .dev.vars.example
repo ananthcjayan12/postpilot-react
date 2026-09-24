@@ -3,5 +3,14 @@ APP_ENCRYPTION_KEY=
 GOOGLE_CLIENT_ID=
 GOOGLE_CLIENT_SECRET=
 ALLOWED_OWNER_EMAIL=
+# Facebook Page OAuth (independent)
+FACEBOOK_APP_ID=
+FACEBOOK_APP_SECRET=
+
+# Instagram API with Instagram Login (independent)
+INSTAGRAM_APP_ID=
+INSTAGRAM_APP_SECRET=
+
+# Backward-compatible Facebook aliases; new setups should prefer FACEBOOK_*.
 META_APP_ID=
 META_APP_SECRET=

@@ -139,32 +139,33 @@ You need a Google OAuth client for signing in and connecting YouTube. The same C
 
 The callback URLs have to match exactly. Google sign-in is checked against `ALLOWED_OWNER_EMAIL`, so a different Google account cannot open the studio. YouTube API quotas, testing status, and Google's verification rules still apply.
 
-## 7. Create Meta / Facebook / Instagram credentials
+## 7. Create separate Instagram and Facebook credentials
 
-Skip this section if you only want studio sign-in and YouTube. Meta needs a Facebook Page and an Instagram **Business or Creator** account linked to that Page.
+Skip this section if you only want studio sign-in and YouTube. PostPilot intentionally uses two independent OAuth connections: direct Instagram Login for Instagram, and Facebook Login for Page publishing.
 
 1. Open [Meta for Developers](https://developers.facebook.com/) and sign in with the Facebook account that manages your Page.
 2. If prompted, complete Meta's developer registration.
-3. Choose **My Apps → Create App**. Give it a name such as `PostPilot` and select the business/app type Meta offers for Facebook Login and Instagram API. The labels may change; the important part is enabling Facebook Login and Instagram API with Facebook Login.
-4. In the app dashboard, add/configure **Facebook Login** and **Instagram API with Facebook Login**.
-5. Find Facebook Login's **Settings**. In **Valid OAuth Redirect URIs**, add the exact Meta callback printed by Actions:
+3. In **Instagram API → API setup with Instagram login**, configure a Business/Creator login app. Register the exact callback printed by Actions:
 
    ```text
-   https://YOUR-ORIGIN/api/oauth/meta/callback
+   https://YOUR-ORIGIN/api/oauth/instagram/callback
    ```
 
-   Save the settings. Add the site hostname to any app-domain or allowed-domain field Meta requires. Keep the callback HTTPS and exact.
+   Enable `instagram_business_basic` and `instagram_business_content_publish`. Copy the Instagram App ID and App Secret and save them in GitHub Actions secrets as `INSTAGRAM_APP_ID` and `INSTAGRAM_APP_SECRET`.
 
-6. In the app dashboard, open **App settings → Basic**. Copy **App ID** and reveal/copy **App secret**. Meta may ask you to confirm your password to show the secret.
-7. In GitHub **Settings → Secrets and variables → Actions → Secrets**, add:
-   - `META_APP_ID` = App ID.
-   - `META_APP_SECRET` = App secret.
-8. In GitHub **Variables**, optionally add `META_PAGE_ID` if you manage several eligible Pages and want to select one. Otherwise leave it empty; PostPilot chooses the first eligible Page. Find the Page ID in the Page's Meta **About/Page transparency** information or in Meta's Page settings. This is an ID, not the Page name.
-9. Leave `META_GRAPH_VERSION` empty to use `v25.0`, or set it to the Graph API version currently supported by the Meta app.
-10. Rerun the GitHub deployment workflow.
-11. In PostPilot **Accounts**, select **Connect through Meta** and approve the requested Page and Instagram permissions.
+4. Configure Facebook Page Login separately. Register:
 
-The app requests `pages_show_list`, `pages_read_engagement`, `pages_manage_posts`, `instagram_basic`, and `instagram_content_publish`. For personal testing, your Facebook account may need to be an app administrator, developer, or tester. Meta may require app review and advanced access before other people can connect their accounts. Instagram must be professional and linked to the Page.
+   ```text
+   https://YOUR-ORIGIN/api/oauth/facebook/callback
+   ```
+
+   Make `pages_show_list`, `pages_read_engagement`, and `pages_manage_posts` available for testing. Save the Facebook app credentials as `FACEBOOK_APP_ID` and `FACEBOOK_APP_SECRET`.
+
+5. In GitHub **Variables**, optionally add `META_PAGE_ID` if the Facebook account manages several Pages. Leave `META_GRAPH_VERSION` empty to use the repository default, or set a version supported by your app.
+6. Rerun the GitHub deployment workflow.
+7. In PostPilot **Accounts**, connect Instagram and Facebook independently.
+
+The older `META_APP_ID` and `META_APP_SECRET` secret names remain accepted as aliases for Facebook only, so an existing deployment can migrate without breaking its Page connection.
 
 ## 8. Enable direct media uploads (R2 keys)
 
@@ -203,8 +204,12 @@ Do not change `APP_ENCRYPTION_KEY` to rotate it. That requires a separate migrat
 | `APP_ENCRYPTION_KEY` | First deployment | Generate once with `openssl rand -base64 32` |
 | `GOOGLE_CLIENT_ID` | Sign-in and YouTube | Google Cloud → Google Auth Platform → Clients |
 | `GOOGLE_CLIENT_SECRET` | Paired with Google Client ID | Same Web application OAuth client |
-| `META_APP_ID` | Facebook/Instagram | Meta for Developers → App settings → Basic |
-| `META_APP_SECRET` | Paired with Meta App ID | Same Meta app; reveal App secret |
+| `FACEBOOK_APP_ID` | Facebook Page publishing | Meta for Developers → Facebook app settings |
+| `FACEBOOK_APP_SECRET` | Paired with Facebook App ID | Same Facebook app |
+| `INSTAGRAM_APP_ID` | Instagram direct login | Instagram API → API setup with Instagram login |
+| `INSTAGRAM_APP_SECRET` | Paired with Instagram App ID | Same Instagram Login setup |
+| `META_APP_ID` | Optional legacy Facebook alias | Existing deployments only |
+| `META_APP_SECRET` | Optional legacy Facebook alias | Existing deployments only |
 | `R2_ACCESS_KEY_ID` | Upload in deployed app | Cloudflare R2 → Manage API Tokens → Object Read & Write |
 | `R2_SECRET_ACCESS_KEY` | Paired with R2 key ID | Same R2 token creation screen; save it when shown |
 
@@ -239,7 +244,8 @@ The previous local data can be imported separately; see [the local-data migratio
 - **Google sign-in succeeds but says account not allowed:** make `ALLOWED_OWNER_EMAIL` match the verified Google email exactly, redeploy, and sign in again.
 - **Google shows an app-testing warning:** add your account under the Google Auth Platform audience's test users.
 - **Meta says URL not allowed:** put the exact HTTPS Meta callback in Facebook Login's Valid OAuth Redirect URIs and save.
-- **Meta connects Facebook but not Instagram:** ensure the Instagram account is Business/Creator and linked to the selected Facebook Page.
+- **Instagram connection fails:** confirm the account is Business/Creator, it has accepted any required tester role, and the exact `/api/oauth/instagram/callback` HTTPS URL is registered under Instagram Login.
+- **Facebook connection fails:** confirm the Facebook user manages an eligible Page and the exact `/api/oauth/facebook/callback` URL is registered.
 - **Upload gets an ETag/CORS error:** check `APP_ORIGIN` matches the actual deployed site, then rerun deployment.
 - **Change a secret:** update it in GitHub and rerun the workflow; never paste it into a source file.
 
@@ -272,8 +278,12 @@ In repository Settings → Secrets and variables → Actions, create the followi
 | APP_ENCRYPTION_KEY | Yes | Persistent token/media-signing key |
 | GOOGLE_CLIENT_ID | No, required to sign in | Google Web OAuth client |
 | GOOGLE_CLIENT_SECRET | Paired with client ID | Google OAuth secret |
-| META_APP_ID | No | Meta integration |
-| META_APP_SECRET | Paired with app ID | Meta OAuth secret |
+| FACEBOOK_APP_ID | No | Independent Facebook Page connection |
+| FACEBOOK_APP_SECRET | Paired with Facebook App ID | Facebook OAuth secret |
+| INSTAGRAM_APP_ID | No | Direct Instagram Business/Creator connection |
+| INSTAGRAM_APP_SECRET | Paired with Instagram App ID | Instagram OAuth secret |
+| META_APP_ID | No | Optional legacy alias for Facebook |
+| META_APP_SECRET | Paired with legacy Meta App ID | Optional legacy Facebook alias |
 | R2_ACCESS_KEY_ID | No, required for production uploads | R2 signing |
 | R2_SECRET_ACCESS_KEY | Paired with access key | R2 signing |
 
@@ -309,7 +319,8 @@ The Actions summary prints the public URL and these callback paths:
 ```text
 https://YOUR-ORIGIN/api/auth/google/callback
 https://YOUR-ORIGIN/api/oauth/google/callback
-https://YOUR-ORIGIN/api/oauth/meta/callback
+https://YOUR-ORIGIN/api/oauth/facebook/callback
+https://YOUR-ORIGIN/api/oauth/instagram/callback
 ```
 
 Bootstrap works without provider keys: the login page and health endpoint are available, private APIs deny access, and sign-in explains missing configuration. R2 keys can be added after the workflow creates the bucket.
@@ -322,11 +333,13 @@ Add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET to GitHub. Studio sign-in requests
 
 ## 5. Meta configuration
 
-Configure a Meta app using Facebook Login and Instagram API with Facebook Login. Register the exact `/api/oauth/meta/callback` URL in Valid OAuth Redirect URIs. Configure the app's required URLs/domains and test roles in the Meta dashboard.
+Configure the providers independently.
 
-Required permissions are pages_show_list, pages_read_engagement, pages_manage_posts, instagram_basic, and instagram_content_publish. Use an eligible Facebook Page and its linked Instagram Professional account. Set META_PAGE_ID when the account manages multiple Pages. App review/access level depends on who uses the integration; start with your own app-role account.
+For Instagram, use **Instagram API with Instagram Login**, register `/api/oauth/instagram/callback`, and request `instagram_business_basic` plus `instagram_business_content_publish`. The Instagram account must be Business or Creator, but it does not need to be linked to a Facebook Page for this flow.
 
-Add META_APP_ID and META_APP_SECRET to GitHub. Set META_GRAPH_VERSION to a version supported by your application. Consult the current Meta dashboard and official API documentation for account and content requirements.
+For Facebook, register `/api/oauth/facebook/callback` and request `pages_show_list`, `pages_read_engagement`, and `pages_manage_posts`. Set META_PAGE_ID when the Facebook account manages multiple Pages and you want to pin one.
+
+Add `INSTAGRAM_APP_ID`/`INSTAGRAM_APP_SECRET` and `FACEBOOK_APP_ID`/`FACEBOOK_APP_SECRET` to GitHub. Existing `META_APP_ID`/`META_APP_SECRET` values are treated as Facebook aliases during migration. Set META_GRAPH_VERSION to a version supported by the provider apps.
 
 ## 6. Finish configuration and verify
 

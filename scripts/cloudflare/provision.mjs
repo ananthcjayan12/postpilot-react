@@ -91,7 +91,8 @@ export async function provision(env = process.env) {
     bucketCreated: bucket.created,
   };
   await writeFile('.cloudflare-state.json', JSON.stringify(state, null, 2));
-  const summary = `\n### Cloudflare resources\n\n- D1: ${names.database} (${db.created ? 'created' : 'reused'})\n- Private R2: ${names.bucket} (${bucket.created ? 'created' : 'reused'})\n- Application: ${origin}\n- Studio sign-in: ${origin}/api/auth/google/callback\n- YouTube: ${origin}/api/oauth/google/callback\n- Meta: ${origin}/api/oauth/meta/callback\n`;
+  const summary = `\n### Cloudflare resources\n\n- D1: ${names.database} (${db.created ? 'created' : 'reused'})\n- Private R2: ${names.bucket} (${bucket.created ? 'created' : 'reused'})\n- Application: ${origin}\n- Studio sign-in: ${origin}/api/auth/google/callback\n- YouTube: ${origin}/api/oauth/google/callback\n- Facebook: ${origin}/api/oauth/facebook/callback
+- Instagram: ${origin}/api/oauth/instagram/callback\n`;
   if (env.GITHUB_STEP_SUMMARY) await appendFile(env.GITHUB_STEP_SUMMARY, summary);
   console.log(summary);
   return state;

@@ -2,7 +2,8 @@ import { randomBytes } from 'node:crypto';
 import { Router } from 'express';
 import { config } from '../config.js';
 import { createGoogleOAuthClient, GOOGLE_SCOPES, saveGoogleGrant, disconnectYouTube } from '../integrations/youtube.js';
-import { disconnectMeta, exchangeMetaCode, metaLoginUrl } from '../integrations/meta.js';
+import { disconnectFacebook, exchangeFacebookCode, facebookLoginUrl } from '../integrations/meta.js';
+import { disconnectInstagram, exchangeInstagramCode, instagramLoginUrl } from '../integrations/instagram.js';
 
 export const oauthRouter = Router();
 
@@ -42,24 +43,47 @@ oauthRouter.get('/google/callback', async (req, res) => {
   }
 });
 
-oauthRouter.get('/meta/start', (req, res) => {
+oauthRouter.get('/facebook/start', (req, res) => {
   try {
     const s = state();
-    res.cookie('pp_meta_state', s, cookieOptions);
-    res.redirect(metaLoginUrl(s));
+    res.cookie('pp_facebook_state', s, cookieOptions);
+    res.redirect(facebookLoginUrl(s));
   } catch (error: any) {
     res.redirect(`${config.appOrigin}/accounts?error=${encodeURIComponent(error?.message || String(error))}`);
   }
 });
 
-oauthRouter.get('/meta/callback', async (req, res) => {
+oauthRouter.get('/facebook/callback', async (req, res) => {
   try {
     const code = String(req.query.code || '');
     const s = String(req.query.state || '');
-    if (!code || !s || s !== req.cookies.pp_meta_state) throw new Error('Meta OAuth state check failed. Please try connecting again.');
-    await exchangeMetaCode(code);
-    res.clearCookie('pp_meta_state');
-    res.redirect(`${config.appOrigin}/accounts?connected=meta`);
+    if (!code || !s || s !== req.cookies.pp_facebook_state) throw new Error('Facebook OAuth state check failed. Please try connecting again.');
+    await exchangeFacebookCode(code);
+    res.clearCookie('pp_facebook_state');
+    res.redirect(`${config.appOrigin}/accounts?connected=facebook`);
+  } catch (error: any) {
+    res.redirect(`${config.appOrigin}/accounts?error=${encodeURIComponent(error?.message || String(error))}`);
+  }
+});
+
+oauthRouter.get('/instagram/start', (req, res) => {
+  try {
+    const s = state();
+    res.cookie('pp_instagram_state', s, cookieOptions);
+    res.redirect(instagramLoginUrl(s));
+  } catch (error: any) {
+    res.redirect(`${config.appOrigin}/accounts?error=${encodeURIComponent(error?.message || String(error))}`);
+  }
+});
+
+oauthRouter.get('/instagram/callback', async (req, res) => {
+  try {
+    const code = String(req.query.code || '');
+    const s = String(req.query.state || '');
+    if (!code || !s || s !== req.cookies.pp_instagram_state) throw new Error('Instagram OAuth state check failed. Please try connecting again.');
+    await exchangeInstagramCode(code);
+    res.clearCookie('pp_instagram_state');
+    res.redirect(`${config.appOrigin}/accounts?connected=instagram`);
   } catch (error: any) {
     res.redirect(`${config.appOrigin}/accounts?error=${encodeURIComponent(error?.message || String(error))}`);
   }
@@ -70,7 +94,12 @@ oauthRouter.post('/google/disconnect', async (_req, res) => {
   res.json({ ok: true });
 });
 
-oauthRouter.post('/meta/disconnect', async (_req, res) => {
-  await disconnectMeta();
+oauthRouter.post('/facebook/disconnect', async (_req, res) => {
+  await disconnectFacebook();
+  res.json({ ok: true });
+});
+
+oauthRouter.post('/instagram/disconnect', async (_req, res) => {
+  await disconnectInstagram();
   res.json({ ok: true });
 });

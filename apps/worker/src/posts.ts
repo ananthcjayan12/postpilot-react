@@ -193,11 +193,36 @@ api.get('/accounts', async (c) => {
     ['youtube', 'instagram', 'facebook'].map((p) => [p, { platform: p, connected: false }]),
   );
   for (const row of rows) accounts[row.platform] = JSON.parse(row.data);
+
+  const providers = new Set(
+    (
+      await c.env.DB.prepare('SELECT provider FROM credentials WHERE user_id=?')
+        .bind(user)
+        .all<{ provider: string }>()
+    ).results.map((row) => row.provider),
+  );
+  if (!providers.has('instagram')) {
+    accounts.instagram = {
+      platform: 'instagram',
+      connected: false,
+      detail: rows.some((row) => row.platform === 'instagram')
+        ? 'Reconnect Instagram using direct Instagram Login.'
+        : undefined,
+    };
+  }
+  if (!providers.has('facebook') && !providers.has('meta')) {
+    accounts.facebook = { platform: 'facebook', connected: false };
+  }
+
   return c.json({
     accounts,
     readiness: {
       googleConfigured: !!(c.env.GOOGLE_CLIENT_ID && c.env.GOOGLE_CLIENT_SECRET),
-      metaConfigured: !!(c.env.META_APP_ID && c.env.META_APP_SECRET),
+      facebookConfigured: !!(
+        (c.env.FACEBOOK_APP_ID || c.env.META_APP_ID) &&
+        (c.env.FACEBOOK_APP_SECRET || c.env.META_APP_SECRET)
+      ),
+      instagramConfigured: !!(c.env.INSTAGRAM_APP_ID && c.env.INSTAGRAM_APP_SECRET),
       publicMediaUrlConfigured: c.env.APP_ORIGIN.startsWith('https://'),
       publicBaseUrl: c.env.APP_ORIGIN,
     },

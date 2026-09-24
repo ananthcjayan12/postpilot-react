@@ -3,7 +3,8 @@ import { config, uploadsDir } from '../config.js';
 import { getMedia, loadDb, updatePost } from '../lib/store.js';
 import type { Platform, PostRecord, PublishResult } from '../types.js';
 import { publishYouTube } from './youtube.js';
-import { publishFacebook, publishInstagram } from './meta.js';
+import { publishFacebook } from './meta.js';
+import { publishInstagram } from './instagram.js';
 
 const inFlight = new Set<string>();
 

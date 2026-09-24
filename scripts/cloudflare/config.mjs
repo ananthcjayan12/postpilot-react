@@ -2,6 +2,10 @@ export const secretNames = [
   'APP_ENCRYPTION_KEY',
   'GOOGLE_CLIENT_ID',
   'GOOGLE_CLIENT_SECRET',
+  'FACEBOOK_APP_ID',
+  'FACEBOOK_APP_SECRET',
+  'INSTAGRAM_APP_ID',
+  'INSTAGRAM_APP_SECRET',
   'META_APP_ID',
   'META_APP_SECRET',
   'R2_ACCESS_KEY_ID',
@@ -20,6 +24,8 @@ export function validate(env) {
     throw new Error('APP_ENCRYPTION_KEY must be 32 random bytes encoded as base64.');
   for (const [a, b] of [
     ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET'],
+    ['FACEBOOK_APP_ID', 'FACEBOOK_APP_SECRET'],
+    ['INSTAGRAM_APP_ID', 'INSTAGRAM_APP_SECRET'],
     ['META_APP_ID', 'META_APP_SECRET'],
     ['R2_ACCESS_KEY_ID', 'R2_SECRET_ACCESS_KEY'],
   ])
