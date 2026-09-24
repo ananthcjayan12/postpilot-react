@@ -27,7 +27,7 @@ export function Sidebar() {
       <div className="sidebar-spacer" />
       <div className="creator-card">
         <div className="avatar mini"><UserCircle2 size={24} /></div>
-        <div><strong>Creator Studio</strong><span>Local workspace</span></div>
+        <div><strong>Creator Studio</strong><span>Cloud workspace</span></div>
       </div>
     </aside>
   );

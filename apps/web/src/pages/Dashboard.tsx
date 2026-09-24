@@ -4,12 +4,13 @@ import { Link } from 'react-router-dom';
 import { PlatformBadge } from '../components/PlatformBadge';
 import { StatusPill } from '../components/StatusPill';
 import { api } from '../lib/api';
+import { useVisibleRefresh } from '../lib/poll';
 import type { MediaAsset, PostRecord } from '../lib/types';
 
 export function Dashboard() {
   const [posts, setPosts] = useState<PostRecord[]>([]);
   const [media, setMedia] = useState<MediaAsset[]>([]);
-  useEffect(() => { void Promise.all([api.posts(), api.media()]).then(([p, m]) => { setPosts(p); setMedia(m); }); }, []);
+  useVisibleRefresh(() => Promise.all([api.posts(), api.media()]).then(([p, m]) => { setPosts(p); setMedia(m); }));
   const published = posts.filter((p) => p.status === 'published').length;
   const scheduled = posts.filter((p) => p.status === 'scheduled').length;
   const failed = posts.filter((p) => p.status === 'failed' || p.status === 'partial').length;
@@ -18,12 +19,12 @@ export function Dashboard() {
   return (
     <>
       <div className="page-heading dashboard-heading">
-        <div><span className="eyebrow">CREATOR OVERVIEW</span><h1>Good afternoon, Alex! <span className="wave">☀️</span></h1><p>Here’s what’s happening with your publishing workspace.</p></div>
+        <div><span className="eyebrow">CREATOR OVERVIEW</span><h1>Your publishing studio <span className="wave">☀️</span></h1><p>Here’s what’s happening with your publishing workspace.</p></div>
         <Link className="btn primary" to="/create"><Plus size={18} /> Create Post</Link>
       </div>
       <section className="stat-grid">
         <div className="stat-card"><div className="stat-icon blue"><FileVideo2 /></div><div><span>Total Content</span><strong>{posts.length}</strong><small>{media.length} uploaded assets</small></div></div>
-        <div className="stat-card"><div className="stat-icon purple"><CalendarClock /></div><div><span>Scheduled</span><strong>{scheduled}</strong><small>Waiting in your local queue</small></div></div>
+        <div className="stat-card"><div className="stat-icon purple"><CalendarClock /></div><div><span>Scheduled</span><strong>{scheduled}</strong><small>Waiting for scheduled publishing</small></div></div>
         <div className="stat-card"><div className="stat-icon green"><Send /></div><div><span>Published</span><strong>{published}</strong><small>Successfully cross-posted jobs</small></div></div>
         <div className="stat-card"><div className="stat-icon amber"><Eye /></div><div><span>Needs attention</span><strong>{failed}</strong><small>Failed or partially published</small></div></div>
       </section>

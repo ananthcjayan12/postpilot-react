@@ -9,6 +9,7 @@
     "typecheck": "tsc -b --pretty false"
   },
   "dependencies": {
+    "@postpilot/shared": "*",
     "@vitejs/plugin-react": "^4.4.1",
     "date-fns": "^4.1.0",
     "lucide-react": "^0.468.0",

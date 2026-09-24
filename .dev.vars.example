@@ -1,0 +1,7 @@
+# Copy to .dev.vars; local resources are isolated by Wrangler.
+APP_ENCRYPTION_KEY=
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
+ALLOWED_OWNER_EMAIL=
+META_APP_ID=
+META_APP_SECRET=

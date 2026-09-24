@@ -7,7 +7,6 @@ export const META_SCOPES = [
   'pages_show_list',
   'pages_read_engagement',
   'pages_manage_posts',
-  'publish_video',
   'instagram_basic',
   'instagram_content_publish'
 ];
@@ -28,9 +27,28 @@ export function metaLoginUrl(state: string) {
     redirect_uri: config.metaRedirectUri,
     state,
     response_type: 'code',
+    auth_type: 'rerequest',
     scope: META_SCOPES.join(',')
   });
   return `https://www.facebook.com/${config.metaGraphVersion}/dialog/oauth?${params.toString()}`;
+}
+
+async function assertGrantedMetaPermissions(userAccessToken: string) {
+  const response = await fetchJson<{ data?: Array<{ permission: string; status: string }> }>(
+    `${graph('/me/permissions')}?${new URLSearchParams({ access_token: userAccessToken })}`
+  );
+  const granted = new Set(
+    (response.data || [])
+      .filter((item) => item.status === 'granted')
+      .map((item) => item.permission)
+  );
+  const missing = META_SCOPES.filter((permission) => !granted.has(permission));
+  if (missing.length) {
+    throw new Error(
+      `Meta did not grant the required permissions: ${missing.join(', ')}. ` +
+      'Make sure the Page permissions are Ready for testing and Instagram is configured with API setup with Facebook login, then reconnect.'
+    );
+  }
 }
 
 export async function exchangeMetaCode(code: string) {
@@ -53,6 +71,8 @@ export async function exchangeMetaCode(code: string) {
   } catch (error) {
     console.warn('Meta long-lived token exchange did not succeed; keeping short-lived token:', error);
   }
+
+  await assertGrantedMetaPermissions(userAccessToken);
 
   type Page = {
     id: string;
@@ -154,7 +174,7 @@ export async function publishInstagram(input: {
       ? { media_type: 'REELS', video_url: input.mediaUrl, share_to_feed: true }
       : { image_url: input.mediaUrl }),
     caption: input.caption.slice(0, 2200),
-    access_token: meta.userAccessToken
+    access_token: meta.pageAccessToken
   });
 
   const created = await fetchJson<{ id: string }>(graph(`/${igId}/media`), {
@@ -163,11 +183,11 @@ export async function publishInstagram(input: {
     body: createBody
   });
 
-  await waitForInstagramContainer(created.id, meta.userAccessToken);
+  await waitForInstagramContainer(created.id, meta.pageAccessToken);
   const published = await fetchJson<{ id: string }>(graph(`/${igId}/media_publish`), {
     method: 'POST',
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
-    body: form({ creation_id: created.id, access_token: meta.userAccessToken })
+    body: form({ creation_id: created.id, access_token: meta.pageAccessToken })
   });
   return { id: published.id };
 }
@@ -193,9 +213,8 @@ export async function publishFacebook(input: {
     return { id: published.post_id || published.id, url: `https://www.facebook.com/${published.post_id || published.id}` };
   }
 
-  // Page video publishing supports a hosted file URL. This is intentionally the
-  // standard Page video endpoint because it is simpler and more stable than the
-  // multi-step Reels upload flow while still publishing the same video to the Page.
+  // Page video publishing uses pages_manage_posts. PostPilot intentionally does
+  // not request the legacy publish_video permission for this publishing flow.
   const published = await fetchJson<{ id: string }>(graph(`/${meta.pageId}/videos`), {
     method: 'POST',
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
