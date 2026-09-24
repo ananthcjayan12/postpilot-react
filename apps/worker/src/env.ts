@@ -8,8 +8,12 @@ export interface Env {
   ALLOWED_OWNER_EMAIL: string;
   GOOGLE_CLIENT_ID: string;
   GOOGLE_CLIENT_SECRET: string;
-  META_APP_ID: string;
-  META_APP_SECRET: string;
+  META_APP_ID?: string;
+  META_APP_SECRET?: string;
+  FACEBOOK_APP_ID?: string;
+  FACEBOOK_APP_SECRET?: string;
+  INSTAGRAM_APP_ID?: string;
+  INSTAGRAM_APP_SECRET?: string;
   META_GRAPH_VERSION: string;
   META_PAGE_ID?: string;
   LOCAL_UPLOADS?: string;
