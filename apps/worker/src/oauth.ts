@@ -314,9 +314,15 @@ oauth.post('/:provider/disconnect', async (c) => {
   if (!['google', 'facebook', 'instagram'].includes(p)) throw new AppError('Unknown provider.', 404);
   const user = c.get('user').id;
   const platform = p === 'google' ? 'youtube' : p;
-  await c.env.DB.batch([
+  const statements = [
     c.env.DB.prepare('DELETE FROM credentials WHERE user_id=? AND provider=?').bind(user, p),
     c.env.DB.prepare('DELETE FROM accounts WHERE user_id=? AND platform=?').bind(user, platform),
-  ]);
+  ];
+  if (p === 'facebook') {
+    statements.push(
+      c.env.DB.prepare('DELETE FROM credentials WHERE user_id=? AND provider=?').bind(user, 'meta'),
+    );
+  }
+  await c.env.DB.batch(statements);
   return c.json({ ok: true });
 });
