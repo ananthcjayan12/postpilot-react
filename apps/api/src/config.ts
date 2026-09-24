@@ -19,6 +19,15 @@ export const config = {
   googleClientId: process.env.GOOGLE_CLIENT_ID || '',
   googleClientSecret: process.env.GOOGLE_CLIENT_SECRET || '',
   googleRedirectUri: process.env.GOOGLE_REDIRECT_URI || 'http://localhost:8787/api/oauth/google/callback',
+  facebookAppId: process.env.FACEBOOK_APP_ID || process.env.META_APP_ID || '',
+  facebookAppSecret: process.env.FACEBOOK_APP_SECRET || process.env.META_APP_SECRET || '',
+  facebookRedirectUri:
+    process.env.FACEBOOK_REDIRECT_URI || 'http://localhost:8787/api/oauth/facebook/callback',
+  instagramAppId: process.env.INSTAGRAM_APP_ID || '',
+  instagramAppSecret: process.env.INSTAGRAM_APP_SECRET || '',
+  instagramRedirectUri:
+    process.env.INSTAGRAM_REDIRECT_URI || 'http://localhost:8787/api/oauth/instagram/callback',
+  // Legacy aliases retained so existing Facebook deployments do not break immediately.
   metaAppId: process.env.META_APP_ID || '',
   metaAppSecret: process.env.META_APP_SECRET || '',
   metaRedirectUri: process.env.META_REDIRECT_URI || 'http://localhost:8787/api/oauth/meta/callback',
