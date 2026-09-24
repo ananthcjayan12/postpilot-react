@@ -23,6 +23,16 @@ function facebookClientSecret(env: Env) {
   return env.FACEBOOK_APP_SECRET || env.META_APP_SECRET || '';
 }
 
+function instagramClientId(env: Env) {
+  if (!env.INSTAGRAM_APP_ID) throw new AppError('Instagram App ID is not configured.', 503);
+  return env.INSTAGRAM_APP_ID;
+}
+
+function instagramClientSecret(env: Env) {
+  if (!env.INSTAGRAM_APP_SECRET) throw new AppError('Instagram App Secret is not configured.', 503);
+  return env.INSTAGRAM_APP_SECRET;
+}
+
 export const facebookGraph = (env: Env, path: string) =>
   `https://graph.facebook.com/${env.META_GRAPH_VERSION}/${path}`;
 
@@ -136,7 +146,7 @@ oauth.get('/:provider/start', async (c) => {
     })}`;
   } else {
     url = `https://www.instagram.com/oauth/authorize?${new URLSearchParams({
-      client_id: c.env.INSTAGRAM_APP_ID,
+      client_id: instagramClientId(c.env),
       redirect_uri,
       response_type: 'code',
       scope: instagramScopes.join(','),
@@ -257,8 +267,8 @@ oauth.get('/:provider/callback', async (c) => {
       const short = await providerJson('https://api.instagram.com/oauth/access_token', {
         method: 'POST',
         body: new URLSearchParams({
-          client_id: c.env.INSTAGRAM_APP_ID,
-          client_secret: c.env.INSTAGRAM_APP_SECRET,
+          client_id: instagramClientId(c.env),
+          client_secret: instagramClientSecret(c.env),
           grant_type: 'authorization_code',
           redirect_uri,
           code,
@@ -267,7 +277,7 @@ oauth.get('/:provider/callback', async (c) => {
       const long = await providerJson(
         `https://graph.instagram.com/access_token?${new URLSearchParams({
           grant_type: 'ig_exchange_token',
-          client_secret: c.env.INSTAGRAM_APP_SECRET,
+          client_secret: instagramClientSecret(c.env),
           access_token: short.access_token,
         })}`,
       );
