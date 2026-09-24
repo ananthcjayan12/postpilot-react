@@ -21,7 +21,8 @@ try {
     throw new Error('Worker deployment failed. Review Wrangler diagnostics.');
   const missing = [
     !secrets.GOOGLE_CLIENT_ID && 'Google sign-in / YouTube credentials not supplied',
-    !secrets.META_APP_ID && 'Meta credentials not supplied',
+    !(secrets.FACEBOOK_APP_ID || secrets.META_APP_ID) && 'Facebook credentials not supplied',
+    !secrets.INSTAGRAM_APP_ID && 'Instagram credentials not supplied',
     !secrets.R2_ACCESS_KEY_ID && 'R2 upload signing credentials not supplied',
   ].filter(Boolean);
   if (process.env.GITHUB_STEP_SUMMARY)
