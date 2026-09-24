@@ -7,6 +7,7 @@ import {
 } from 'cloudflare:test';
 import { beforeAll, beforeEach, afterEach, describe, it, expect, vi } from 'vitest';
 import { app } from '../src/index';
+import { uploadVideo } from '../src/gemini';
 import { hash, seal, unseal, signMedia, validMediaSignature, now, saveCredential } from '../src/lib';
 import { ownerAllowed } from '../src/auth';
 import { dispatch } from '../src/posts';
@@ -107,6 +108,42 @@ async function seed(platform = 'youtube') {
   };
 }
 describe('session and API boundaries', () => {
+  it('transfers a video in bounded chunks with exact bytes and finalizes only the last chunk', async () => {
+    const { media } = await seed();
+    const chunkSize = 8 * 1024 ** 2;
+    const data = new Uint8Array(chunkSize + 17);
+    data.fill(5, 0, chunkSize); data.fill(9, chunkSize);
+    await e.MEDIA.put(media.object_key, data);
+    const chunks: { offset: string; command: string; size: number }[] = [];
+    vi.mocked(fetch).mockImplementation(async (url: any, init: any) => {
+      if (String(url).endsWith('/upload/v1beta/files')) return new Response('{}', { headers: { 'X-Goog-Upload-URL': 'https://generativelanguage.googleapis.com/upload/session', 'X-Goog-Upload-Chunk-Granularity': '262144' } });
+      expect(init.body).toBeInstanceOf(ArrayBuffer);
+      const bytes = new Uint8Array(init.body);
+      chunks.push({ offset: init.headers['X-Goog-Upload-Offset'], command: init.headers['X-Goog-Upload-Command'], size: bytes.length });
+      expect(bytes.every((byte) => byte === (chunks.length === 1 ? 5 : 9))).toBe(true);
+      return chunks.length === 1 ? new Response('') : Response.json({ file: { name: 'files/testvideo', state: 'ACTIVE' } });
+    });
+    expect((await uploadVideo(e, { ...media, size: data.length }, 'test-key')).name).toBe('files/testvideo');
+    expect(chunks).toEqual([
+      { offset: '0', command: 'upload', size: chunkSize },
+      { offset: String(chunkSize), command: 'upload, finalize', size: 17 },
+    ]);
+  });
+  it('preserves a redacted network failure instead of incorrectly calling it a timeout', async () => {
+    const { media } = await seed();
+    const key = 'test-key';
+    const uploadUrl = 'https://generativelanguage.googleapis.com/upload/session?token=secret';
+    vi.mocked(fetch).mockImplementation(async (url: any) => {
+      if (String(url).endsWith('/upload/v1beta/files')) return new Response('{}', { headers: { 'X-Goog-Upload-URL': uploadUrl } });
+      throw new TypeError(`Connection reset for ${uploadUrl} key ${key}`);
+    });
+    const error = await uploadVideo(e, media, key).catch((error) => error);
+    expect(error.message).toContain('connection failed at byte 0 of 4');
+    expect(error.message).toContain('Connection reset');
+    expect(error.message).not.toContain(key);
+    expect(error.message).not.toContain('token=secret');
+    expect(error.message).not.toContain('timed out');
+  });
   it('encrypts the Gemini key, preserves it on ordinary saves, and removes it explicitly', async () => {
     const preferences = { youtube: true, instagram: false, facebook: false, notify: true, confirm: true, schedulerEnabled: true };
     const key = 'test-gemini-secret-key';
