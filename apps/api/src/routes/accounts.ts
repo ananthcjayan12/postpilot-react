@@ -10,7 +10,8 @@ accountsRouter.get('/', async (_req, res) => {
     accounts: db.accounts,
     readiness: {
       googleConfigured: Boolean(config.googleClientId && config.googleClientSecret),
-      metaConfigured: Boolean(config.metaAppId && config.metaAppSecret),
+      facebookConfigured: Boolean(config.facebookAppId && config.facebookAppSecret),
+      instagramConfigured: Boolean(config.instagramAppId && config.instagramAppSecret),
       publicMediaUrlConfigured: Boolean(config.publicBaseUrl),
       publicBaseUrl: config.publicBaseUrl || null
     }
