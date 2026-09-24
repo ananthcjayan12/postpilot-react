@@ -29,5 +29,4 @@
     "STORAGE_QUOTA_BYTES": "53687091200",
   },
   "observability": { "enabled": true },
-  "limits": { "cpu_ms": 30000 },
 }
