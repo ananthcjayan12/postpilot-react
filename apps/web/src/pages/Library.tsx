@@ -1,4 +1,4 @@
-import { FileImage, FileVideo2, MoreHorizontal, Play, Search, Upload } from 'lucide-react';
+import { Edit3, FileImage, FileVideo2, Play, Search, Upload } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../lib/api';
@@ -92,9 +92,11 @@ export function Library() {
           <div className="media-grid">
             {visible.map((asset) => {
               const post = postByMedia.get(asset.id);
+              const resumable = post && ['draft', 'scheduled'].includes(post.status);
+              const destination = resumable ? `/create/${post.id}` : `/create?mediaId=${asset.id}`;
               return (
                 <article className="media-card" key={asset.id}>
-                  <div className="media-thumb">
+                  <Link className="media-thumb" to={destination} aria-label={resumable ? `Resume ${post.title}` : `Create a project from ${asset.originalName}`}>
                     {asset.mimeType.startsWith('video/') ? (
                       <>
                         <video src={asset.localUrl} muted />
@@ -113,19 +115,17 @@ export function Library() {
                       )}
                       {asset.mimeType.split('/')[0]}
                     </span>
-                  </div>
+                  </Link>
                   <div className="media-card-body">
                     <div className="media-card-title">
                       <div>
-                        <strong>{post?.title || asset.originalName}</strong>
+                        <strong><Link to={destination}>{post?.title || asset.originalName}</Link></strong>
                         <span>
                           {new Date(asset.createdAt).toLocaleDateString()} ·{' '}
                           {(asset.size / 1024 / 1024).toFixed(1)} MB
                         </span>
                       </div>
-                      <button className="icon-button ghost">
-                        <MoreHorizontal />
-                      </button>
+                      <Link className="icon-button ghost" to={destination} title={resumable ? 'Resume project' : 'Use this media'}><Edit3 /></Link>
                     </div>
                     {post ? (
                       <>
@@ -142,10 +142,9 @@ export function Library() {
                           </>
                         )}
                         {post.status === 'draft' && (
-                          <button className="btn secondary small" onClick={() => void publish(post.id)}>
-                            Publish draft
-                          </button>
+                          <><Link className="btn secondary small" to={destination}>Resume project</Link><button className="btn secondary small" onClick={() => void publish(post.id)}>Publish draft</button></>
                         )}
+                        {post.status === 'scheduled' && <Link className="btn secondary small" to={destination}>Edit scheduled post</Link>}
                       </>
                     ) : (
                       <span className="status-pill draft">
@@ -153,6 +152,7 @@ export function Library() {
                         asset only
                       </span>
                     )}
+                    {!resumable && <Link className="btn secondary small" to={destination}>Use in new project</Link>}
                   </div>
                 </article>
               );

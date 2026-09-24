@@ -57,6 +57,7 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;background:#f1f5f9;
 .gemini-panel{padding:14px;margin-bottom:18px;background:#f5f8ff;border:1px solid #e1e9fb;border-radius:10px}.gemini-panel p{font-size:11px;line-height:1.6;color:#5b6880}.gemini-panel a{color:var(--blue)}.gemini-suggestions{display:grid;gap:8px}.gemini-suggestions h3{font-size:12px;margin:8px 0 0}.suggestion-title{border:1px solid var(--line);background:white;padding:10px;border-radius:8px;text-align:left;color:#273249}.suggestion-title:hover{border-color:var(--blue)}.gemini-suggestions .suggestion-description{white-space:pre-wrap;max-height:240px;overflow:auto;margin:0;padding:10px;background:#fff;border-radius:8px}
 .youtube-format{margin-top:18px}.youtube-format p{font-size:11px;line-height:1.5}
 .media-preview:has(>video){background:transparent}
+.media-card-title strong a{color:inherit}.media-card .btn.small{margin-top:9px;margin-right:6px}.media-thumb{cursor:pointer}
 .media-preview>video{width:auto;height:auto;max-width:100%;max-height:440px;margin-inline:auto;object-fit:contain}
 .video-preview-screen{width:fit-content;max-width:100%;height:auto;margin-inline:auto;background:transparent}
 .video-preview-screen video{display:block;width:auto;height:auto;max-width:100%;max-height:280px;object-fit:contain}

@@ -16,6 +16,7 @@ export default function App() {
       <Route element={<AppLayout />}>
         <Route index element={<Dashboard />} />
         <Route path="create" element={<CreatePost />} />
+        <Route path="create/:postId" element={<CreatePost />} />
         <Route path="calendar" element={<CalendarPage />} />
         <Route path="library" element={<Library />} />
         <Route path="analytics" element={<Analytics />} />

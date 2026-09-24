@@ -1,6 +1,6 @@
 import { CalendarClock, Check, CloudUpload, Facebook, Instagram, LoaderCircle, Play, Save, Send, Sparkles, UploadCloud, Youtube } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api';
 import { shortsEligibility, type VideoMetadata } from '@postpilot/shared';
 import type { AccountsResponse, MediaAsset, Platform } from '../lib/types';
@@ -13,6 +13,8 @@ const platforms: { id: Platform; label: string; icon: any; helper: string }[] = 
 
 export function CreatePost() {
   const navigate = useNavigate();
+  const { postId } = useParams();
+  const [searchParams] = useSearchParams();
   const [asset, setAsset] = useState<MediaAsset | null>(null);
   const [localPreview, setLocalPreview] = useState('');
   const [title, setTitle] = useState('');
@@ -26,8 +28,33 @@ export function CreatePost() {
   const [error, setError] = useState('');
   const [accounts, setAccounts] = useState<AccountsResponse | null>(null);
   const [confirmPublish,setConfirmPublish]=useState(true);
-  useEffect(()=>{void api.settings().then(s=>{setSelected((['youtube','instagram','facebook'] as Platform[]).filter(p=>s[p]));setConfirmPublish(s.confirm);}).catch(()=>{});},[]);
-  useEffect(() => { void api.accounts().then(setAccounts); }, []);
+  const [loadingProject, setLoadingProject] = useState(true);
+  useEffect(() => {
+    void Promise.all([api.settings(), api.accounts(), api.media(), api.posts()])
+      .then(([settings, connectedAccounts, media, posts]) => {
+        setAccounts(connectedAccounts); setConfirmPublish(settings.confirm);
+        const project = postId ? posts.find((post) => post.id === postId) : undefined;
+        const mediaId = project?.mediaId || searchParams.get('mediaId');
+        const existingAsset = mediaId ? media.find((item) => item.id === mediaId) : undefined;
+        if (postId && !project) throw new Error('This project could not be found.');
+        if (mediaId && !existingAsset) throw new Error('This uploaded media could not be found.');
+        if (project && !['draft', 'scheduled'].includes(project.status)) throw new Error('Only draft or scheduled projects can be resumed.');
+        if (existingAsset) setAsset(existingAsset);
+        if (project) {
+          setTitle(project.title); setCaption(project.caption); setSelected(project.platforms);
+          setYoutubeFormat(project.youtubeFormat || 'video');
+          if (project.scheduledFor) {
+            const date = new Date(project.scheduledFor);
+            setSchedule(new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16));
+          }
+        } else {
+          setSelected((['youtube','instagram','facebook'] as Platform[]).filter((platform) => settings[platform]));
+          if (existingAsset) setTitle(existingAsset.originalName.replace(/\.[^.]+$/, '').replace(/[-_]+/g, ' '));
+        }
+      })
+      .catch((e) => setError(e.message))
+      .finally(() => setLoadingProject(false));
+  }, [postId, searchParams]);
   useEffect(() => () => { if (localPreview) URL.revokeObjectURL(localPreview); }, [localPreview]);
 
   const metaSelected = selected.includes('instagram') || selected.includes('facebook');
@@ -68,7 +95,12 @@ export function CreatePost() {
     if (action === 'publish' && confirmPublish && !window.confirm('Publish this post to the selected accounts?')) return;
     setBusy(action === 'publish' ? 'Publishing to selected platforms…' : action === 'schedule' ? 'Adding to schedule…' : 'Saving draft…');
     try {
-      const post = await api.createPost({ title, caption, mediaId: asset.id, platforms: selected, action, youtubeFormat, videoMetadata, scheduledFor: schedule ? new Date(schedule).toISOString() : undefined });
+      const input = { title, caption, mediaId: asset.id, platforms: selected, youtubeFormat, videoMetadata, scheduledFor: schedule ? new Date(schedule).toISOString() : undefined };
+      let post;
+      if (postId) {
+        post = await api.updatePost(postId, { ...input, action: action === 'schedule' ? 'schedule' : 'draft' });
+        if (action === 'publish') post = await api.publish(postId);
+      } else post = await api.createPost({ ...input, action });
       if (post.status === 'failed' || post.status === 'partial') setError(post.lastError || 'One or more platforms failed to publish.');
       else navigate(action === 'schedule' ? '/calendar' : '/library');
     } catch (e: any) { setError(e.message); } finally { setBusy(''); }
@@ -76,7 +108,7 @@ export function CreatePost() {
 
   return (
     <>
-      <div className="page-heading"><div><span className="eyebrow">CREATE</span><h1>Upload Video</h1><p>Create once, then publish the same media across your connected channels.</p></div><button className="btn secondary" onClick={() => void submit('draft')} disabled={!!busy}><Save size={17} /> Save Draft</button></div>
+      <div className="page-heading"><div><span className="eyebrow">{postId ? 'RESUME' : 'CREATE'}</span><h1>{postId ? 'Edit Project' : asset ? 'Create from Library' : 'Upload Video'}</h1><p>{postId ? 'Continue editing this saved project.' : 'Create once, then publish the same media across your connected channels.'}</p></div><button className="btn secondary" onClick={() => void submit('draft')} disabled={!!busy || loadingProject}><Save size={17} /> {postId ? 'Save Changes' : 'Save Draft'}</button></div>
       {error && <div className="alert danger">{error}</div>}
       {metaSelected && accounts && !accounts.readiness.publicMediaUrlConfigured && <div className="alert warning"><strong>Meta needs a public media URL.</strong> Use the deployed HTTPS studio to publish to Instagram or Facebook.</div>}
       <div className="composer-grid">
@@ -95,7 +127,7 @@ export function CreatePost() {
                 if (!video.videoWidth || !video.videoHeight || !Number.isFinite(video.duration) || video.duration <= 0) return;
                 const metadata = { width: video.videoWidth, height: video.videoHeight, duration: video.duration };
                 setVideoMetadata(metadata);
-                setYoutubeFormat(shortsEligibility(metadata) ? 'video' : 'short');
+                if (!postId) setYoutubeFormat(shortsEligibility(metadata) ? 'video' : 'short');
               }} /> : <img src={localPreview || asset.localUrl} alt="preview" />}
               <div className="media-preview-bar"><div><strong>{asset.originalName}</strong><span>{(asset.size / 1024 / 1024).toFixed(1)} MB · uploaded</span></div><label className="btn secondary small"><UploadCloud size={15} /> Replace<input type="file" accept="video/*,image/*" hidden onChange={(e) => void chooseFile(e.target.files?.[0])} /></label></div>
             </div>

@@ -112,6 +112,64 @@ api.post('/posts', async (c) => {
     201,
   );
 });
+api.put('/posts/:id', async (c) => {
+  const v = postInput.parse(await c.req.json());
+  if (v.action === 'publish') throw new AppError('Save the project before publishing it.', 400);
+  const id = c.req.param('id'),
+    user = c.get('user').id;
+  const post = await c.env.DB.prepare('SELECT * FROM posts WHERE id=? AND user_id=?')
+    .bind(id, user)
+    .first<PostRow>();
+  if (!post) throw new AppError('Post not found.', 404);
+  if (!['draft', 'scheduled'].includes(post.status))
+    throw new AppError('Only draft or scheduled projects can be edited.', 409);
+  const active = await c.env.DB.prepare(
+    "SELECT id FROM runs WHERE post_id=? AND status IN ('pending','dispatched')",
+  )
+    .bind(id)
+    .first();
+  if (active) throw new AppError('This project is currently publishing and cannot be edited.', 409);
+  const media = await c.env.DB.prepare('SELECT id,mime FROM media WHERE id=? AND user_id=?')
+    .bind(v.mediaId, user)
+    .first<{ id: string; mime: string }>();
+  if (!media) throw new AppError('Select an uploaded media asset.');
+  if (v.platforms.includes('youtube') && v.youtubeFormat === 'short') {
+    if (!media.mime.startsWith('video/')) throw new AppError('YouTube Shorts require a video.');
+    const error = shortsEligibility(v.videoMetadata);
+    if (error) throw new AppError(error);
+  }
+  if (v.action === 'schedule' && (!v.scheduledFor || Date.parse(v.scheduledFor) <= Date.now()))
+    throw new AppError('Choose a future schedule time.');
+  const time = now();
+  await c.env.DB.batch([
+    c.env.DB.prepare(
+      'UPDATE posts SET media_id=?,title=?,caption=?,status=?,scheduled_for=?,updated_at=?,last_error=NULL WHERE id=? AND user_id=?',
+    ).bind(
+      v.mediaId,
+      v.title,
+      v.caption,
+      v.action === 'schedule' ? 'scheduled' : 'draft',
+      v.action === 'schedule' ? v.scheduledFor! : null,
+      time,
+      id,
+      user,
+    ),
+    c.env.DB.prepare('DELETE FROM targets WHERE post_id=?').bind(id),
+    ...v.platforms.map((platform) =>
+      c.env.DB.prepare('INSERT INTO targets(post_id,platform,data) VALUES(?,?,?)').bind(
+        id,
+        platform,
+        JSON.stringify(platform === 'youtube' ? { youtubeFormat: v.youtubeFormat } : {}),
+      ),
+    ),
+  ]);
+  return c.json(
+    await postJson(
+      c.env,
+      (await c.env.DB.prepare('SELECT * FROM posts WHERE id=?').bind(id).first<PostRow>())!,
+    ),
+  );
+});
 api.post('/posts/:id/:action', async (c) => {
   if (!['publish', 'retry'].includes(c.req.param('action'))) throw new AppError('Not found.', 404);
   const id = c.req.param('id'),

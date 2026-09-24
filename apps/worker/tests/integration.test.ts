@@ -167,6 +167,24 @@ describe('session and API boundaries', () => {
       expect((await response.json() as any).youtubeFormat).toBe('short');
     }
   });
+  it('updates a resumed draft without creating a duplicate post', async () => {
+    const { post, media } = await seed();
+    const response = await call('/api/posts/' + post.id, 'PUT', {
+      title: 'Resumed project',
+      caption: 'Updated description',
+      mediaId: media.id,
+      platforms: ['youtube', 'instagram'],
+      action: 'draft',
+      youtubeFormat: 'short',
+      videoMetadata: { width: 1080, height: 1920, duration: 30 },
+    });
+    expect(response.status).toBe(200);
+    const body: any = await response.json();
+    expect(body.title).toBe('Resumed project');
+    expect(body.platforms.sort()).toEqual(['instagram', 'youtube']);
+    expect(body.youtubeFormat).toBe('short');
+    expect((await e.DB.prepare('SELECT COUNT(*) AS count FROM posts').first<any>()).count).toBe(1);
+  });
   it('reports Google upload rejection details without exposing credentials or session URLs', async () => {
     const { media } = await seed();
     const apiKey = 'test-gemini-secret';

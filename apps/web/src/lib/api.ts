@@ -147,6 +147,20 @@ export const api = {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(input),
     }),
+  updatePost: (id: string, input: {
+    title: string;
+    caption: string;
+    mediaId: string;
+    platforms: Platform[];
+    action: 'draft' | 'schedule';
+    scheduledFor?: string;
+    youtubeFormat?: 'video' | 'short';
+    videoMetadata?: { width: number; height: number; duration: number };
+  }) => request<PostRecord>(`/api/posts/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  }),
   publish: (id: string) => request<PostRecord>(`/api/posts/${id}/publish`, { method: 'POST' }),
   retry: (id: string) => request<PostRecord>(`/api/posts/${id}/retry`, { method: 'POST' }),
   resolve: (id: string, platform: Platform, outcome: 'published' | 'not_published', remoteId?: string) =>
