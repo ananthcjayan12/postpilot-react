@@ -193,6 +193,27 @@ api.get('/accounts', async (c) => {
     ['youtube', 'instagram', 'facebook'].map((p) => [p, { platform: p, connected: false }]),
   );
   for (const row of rows) accounts[row.platform] = JSON.parse(row.data);
+
+  const providers = new Set(
+    (
+      await c.env.DB.prepare('SELECT provider FROM credentials WHERE user_id=?')
+        .bind(user)
+        .all<{ provider: string }>()
+    ).results.map((row) => row.provider),
+  );
+  if (!providers.has('instagram')) {
+    accounts.instagram = {
+      platform: 'instagram',
+      connected: false,
+      detail: rows.some((row) => row.platform === 'instagram')
+        ? 'Reconnect Instagram using direct Instagram Login.'
+        : undefined,
+    };
+  }
+  if (!providers.has('facebook') && !providers.has('meta')) {
+    accounts.facebook = { platform: 'facebook', connected: false };
+  }
+
   return c.json({
     accounts,
     readiness: {
