@@ -82,7 +82,9 @@ export async function uploadVideo(env: AppEnv['Bindings'], media: MediaRow, apiK
     try {
       uploaded = await fetch(uploadUrl, {
         signal: AbortSignal.timeout(120_000),
-        redirect: 'error',
+        // Cloudflare Workers only supports `follow` and `manual` here. The
+        // Google upload session URL is already host-validated above.
+        redirect: 'manual',
         method: 'POST',
         headers: {
           'x-goog-api-key': apiKey,
