@@ -28,7 +28,7 @@ export function Analytics() {
       <section className="stat-grid">
         <div className="stat-card"><div className="stat-icon blue"><Layers3 /></div><div><span>Total jobs</span><strong>{data?.total ?? 0}</strong><small>Drafts, scheduled and published</small></div></div>
         <div className="stat-card"><div className="stat-icon green"><CheckCircle2 /></div><div><span>Published</span><strong>{data?.counts?.published ?? 0}</strong><small>All selected channels succeeded</small></div></div>
-        <div className="stat-card"><div className="stat-icon purple"><CalendarCheck2 /></div><div><span>Scheduled</span><strong>{data?.counts?.scheduled ?? 0}</strong><small>Waiting for the local scheduler</small></div></div>
+        <div className="stat-card"><div className="stat-icon purple"><CalendarCheck2 /></div><div><span>Scheduled</span><strong>{data?.counts?.scheduled ?? 0}</strong><small>Waiting for scheduled publishing</small></div></div>
         <div className="stat-card"><div className="stat-icon amber"><AlertTriangle /></div><div><span>Needs attention</span><strong>{(data?.counts?.failed ?? 0) + (data?.counts?.partial ?? 0)}</strong><small>Failed or partially published jobs</small></div></div>
       </section>
       <div className="analytics-grid">

@@ -1,5 +1,41 @@
 # PostPilot
 
+## Cloudflare version
+
+The current application uses **React + a Hono Worker + D1 + private R2 + Cloudflare Workflows**. The UI is preserved, while uploads, authentication, scheduling, and publishing now run on Cloudflare. The Express implementation is retained only for legacy use and migration.
+
+- [Step-by-step GitHub Actions deployment](docs/cloudflare-deployment.md)
+- [Architecture and reliability](docs/architecture.md)
+- [Import existing local data](docs/local-data-migration.md)
+
+```bash
+# Node.js 22+
+npm ci
+npm run setup
+# Fill .dev.vars with local Google OAuth credentials and allowed owner email.
+npm run db:migrate
+npm run build
+npm run dev
+```
+
+Open http://localhost:5173. Studio sign-in uses real Google authentication; there is no local-storage login bypass. Configure localhost redirect URLs as described in the deployment guide.
+
+```bash
+npm run typecheck
+npm test
+npm run build
+```
+
+Push to `main` after configuring GitHub secrets/variables. The deployment workflow creates or reuses D1/R2, configures uploads, applies migrations, and deploys frontend, API, Workflows, Cron, and secrets. Its summary prints the public URL and OAuth callbacks. Creating Google/Meta apps, enabling Cloudflare billing/services, and granting personal OAuth consent remain one-time manual steps.
+
+No production deployment or real provider publishing is implied by a successful local build. Test those using your own configured account. The UI reports publishing asynchronously, and uncertain external outcomes are held for review to avoid duplicates.
+
+---
+
+## Legacy local Express instructions
+
+The sections below describe the previous local runtime. Use `npm run setup:legacy` and `npm run dev:legacy` for that runtime. Root `npm run build`, `npm run dev`, and `npm run setup` now target Cloudflare; do not use the old instructions to deploy production.
+
 A local-first React + Node publishing studio inspired by the selected **PostPilot** UI concept. Upload one video, publish it to **YouTube + Instagram + a Facebook Page**, or schedule it for later — without a paid scheduling service.
 
 ## What is included

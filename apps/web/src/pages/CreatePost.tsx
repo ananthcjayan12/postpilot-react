@@ -21,6 +21,8 @@ export function CreatePost() {
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
   const [accounts, setAccounts] = useState<AccountsResponse | null>(null);
+  const [confirmPublish,setConfirmPublish]=useState(true);
+  useEffect(()=>{void api.settings().then(s=>{setSelected((['youtube','instagram','facebook'] as Platform[]).filter(p=>s[p]));setConfirmPublish(s.confirm);}).catch(()=>{});},[]);
   useEffect(() => { void api.accounts().then(setAccounts); }, []);
   useEffect(() => () => { if (localPreview) URL.revokeObjectURL(localPreview); }, [localPreview]);
 
@@ -28,11 +30,12 @@ export function CreatePost() {
   const missingConnections = useMemo(() => selected.filter((p) => !accounts?.accounts[p]?.connected), [accounts, selected]);
 
   const chooseFile = async (file?: File) => {
-    if (!file) return;
+    if (!file || busy) return;
+    setAsset(null);
     setError(''); setBusy('Uploading media…');
     const preview = URL.createObjectURL(file); setLocalPreview(preview);
     try {
-      const uploaded = await api.upload(file);
+      const uploaded = await api.upload(file, percentage=>setBusy(`Uploading media… ${percentage}%`));
       setAsset(uploaded);
       if (!title) setTitle(file.name.replace(/\.[^.]+$/, '').replace(/[-_]+/g, ' '));
     } catch (e: any) { setError(e.message); } finally { setBusy(''); }
@@ -44,6 +47,7 @@ export function CreatePost() {
     if (!title.trim()) return setError('Add a title.');
     if (!selected.length) return setError('Choose at least one platform.');
     if (action === 'schedule' && !schedule) return setError('Choose a schedule date and time.');
+    if (action === 'publish' && confirmPublish && !window.confirm('Publish this post to the selected accounts?')) return;
     setBusy(action === 'publish' ? 'Publishing to selected platforms…' : action === 'schedule' ? 'Adding to schedule…' : 'Saving draft…');
     try {
       const post = await api.createPost({ title, caption, mediaId: asset.id, platforms: selected, action, scheduledFor: schedule ? new Date(schedule).toISOString() : undefined });
@@ -56,7 +60,7 @@ export function CreatePost() {
     <>
       <div className="page-heading"><div><span className="eyebrow">CREATE</span><h1>Upload Video</h1><p>Create once, then publish the same media across your connected channels.</p></div><button className="btn secondary" onClick={() => void submit('draft')} disabled={!!busy}><Save size={17} /> Save Draft</button></div>
       {error && <div className="alert danger">{error}</div>}
-      {metaSelected && accounts && !accounts.readiness.publicMediaUrlConfigured && <div className="alert warning"><strong>Meta needs a public media URL.</strong> Uploading works locally, but Instagram/Facebook publishing needs <code>PUBLIC_BASE_URL</code>. The README includes a free local tunnel setup.</div>}
+      {metaSelected && accounts && !accounts.readiness.publicMediaUrlConfigured && <div className="alert warning"><strong>Meta needs a public media URL.</strong> Use the deployed HTTPS studio to publish to Instagram or Facebook.</div>}
       <div className="composer-grid">
         <section className="panel composer-main">
           <div className="section-kicker">1 · MEDIA</div>

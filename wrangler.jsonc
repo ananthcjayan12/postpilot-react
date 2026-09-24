@@ -1,0 +1,33 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "postpilot",
+  "main": "apps/worker/src/index.ts",
+  "compatibility_date": "2026-08-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "assets": {
+    "directory": "apps/web/dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*", "/media-files/*", "/media-delivery/*", "/health"],
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "postpilot-db",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "apps/worker/migrations",
+    },
+  ],
+  "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "postpilot-media" }],
+  "workflows": [{ "binding": "PUBLISH", "name": "postpilot-publish", "class_name": "PublishPost" }],
+  "triggers": { "crons": ["* * * * *"] },
+  "vars": {
+    "APP_ORIGIN": "http://localhost:5173",
+    "LOCAL_UPLOADS": "true",
+    "META_GRAPH_VERSION": "v25.0",
+    "STORAGE_QUOTA_BYTES": "53687091200",
+  },
+  "observability": { "enabled": true },
+  "limits": { "cpu_ms": 30000 },
+}

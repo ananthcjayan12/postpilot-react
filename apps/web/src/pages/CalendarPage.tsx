@@ -4,12 +4,13 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { PlatformBadge } from '../components/PlatformBadge';
 import { api } from '../lib/api';
+import { useVisibleRefresh } from '../lib/poll';
 import type { PostRecord } from '../lib/types';
 
 export function CalendarPage() {
   const [month, setMonth] = useState(new Date());
   const [posts, setPosts] = useState<PostRecord[]>([]);
-  useEffect(() => { void api.posts().then(setPosts); }, []);
+  useVisibleRefresh(() => api.posts().then(setPosts));
   const days = useMemo(() => eachDayOfInterval({ start: startOfWeek(startOfMonth(month)), end: endOfWeek(endOfMonth(month)) }), [month]);
   const scheduled = posts.filter((p) => p.scheduledFor);
 

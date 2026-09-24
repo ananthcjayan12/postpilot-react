@@ -1,12 +1,9 @@
 import { ArrowRight, CheckCircle2, Facebook, Instagram, Youtube } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
 import { Logo } from '../components/Logo';
 
 export function Login() {
-  const navigate = useNavigate();
   const enter = () => {
-    localStorage.setItem('postpilot-local-session', '1');
-    navigate('/');
+    location.assign('/api/auth/google/start');
   };
   return (
     <div className="login-page">
@@ -26,17 +23,16 @@ export function Login() {
         </section>
         <section className="login-panel">
           <div className="login-form-card">
-            <span className="eyebrow">LOCAL-FIRST · FREE</span>
+            <span className="eyebrow">YOUR CREATOR WORKSPACE</span>
             <h2>Welcome back 👋</h2>
-            <p>Enter your local PostPilot workspace. Platform authorization happens separately in Connected Accounts.</p>
-            <label>Email</label>
-            <input className="input" defaultValue="creator@postpilot.local" />
+            <p>Sign in with your authorized Google account. Publishing permissions are connected separately in Accounts.</p>
+            {new URLSearchParams(location.search).get('error') && <div className="alert danger">{new URLSearchParams(location.search).get('error')}</div>}
             <label>Workspace</label>
             <div className="input fake-input">PostPilot Creator Studio</div>
-            <button className="btn primary large" onClick={enter}>Enter Studio <ArrowRight size={18} /></button>
+            <button className="btn primary large" onClick={enter}>Continue with Google <ArrowRight size={18} /></button>
             <div className="login-notes">
               <div><CheckCircle2 size={17} /> No paid scheduler</div>
-              <div><CheckCircle2 size={17} /> OAuth tokens stay on your machine</div>
+              <div><CheckCircle2 size={17} /> Encrypted account credentials</div>
               <div><CheckCircle2 size={17} /> Official YouTube + Meta APIs</div>
             </div>
           </div>
