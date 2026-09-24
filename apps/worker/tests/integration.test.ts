@@ -310,11 +310,15 @@ describe('durable publishing boundaries', () => {
   });
   it('reconciles a published Instagram container', async () => {
     const { post } = await seed('instagram');
-    await saveCredential(e, user, 'meta', { pageAccessToken: 'test', instagramBusinessId: 'ig' });
+    await saveCredential(e, user, 'instagram', {
+      accessToken: 'test',
+      userId: 'ig',
+      expiryDate: Date.now() + 3600000,
+    });
     await e.DB.prepare("UPDATE targets SET status='sending',data=? WHERE post_id=?")
       .bind(JSON.stringify({ container: 'container' }), post.id)
       .run();
-    mockProvider('https://graph.facebook.com/v25.0/container?fields=status_code', {
+    mockProvider('https://graph.instagram.com/v25.0/container?fields=status_code', {
       status_code: 'PUBLISHED',
     });
     await publishInstagram(e, post);
