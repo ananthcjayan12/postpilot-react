@@ -69,7 +69,8 @@ async function readInstagram(env: Env, path: string, token: string) {
   );
 }
 async function facebookToken(env: Env, user: string) {
-  const grant = await getCredential(env, user, 'facebook');
+  const grant =
+    (await getCredential(env, user, 'facebook')) || (await getCredential(env, user, 'meta'));
   if (!grant) throw new NonRetryableError('Connect Facebook before publishing.');
   return grant.value;
 }
