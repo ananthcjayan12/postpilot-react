@@ -1,4 +1,4 @@
-import type { thumbnailPeopleOptions } from '@postpilot/shared';
+import type { thumbnailPeopleOptions, ThumbnailModel } from '@postpilot/shared';
 import type { AccountsResponse, MediaAsset, Platform, PostRecord } from './types';
 
 let csrf = '';
@@ -17,7 +17,7 @@ export type Settings = {
     metadata: 'gemini:gemini-3.8-flash' | 'gemini:gemini-2.5-flash';
     hashtags: 'gemini:gemini-3.8-flash' | 'gemini:gemini-2.5-flash' | 'openai:gpt-5-mini' | 'openai:gpt-4.1-mini';
     thumbnailCopy: 'gemini:gemini-3.8-flash' | 'gemini:gemini-2.5-flash' | 'openai:gpt-5-mini' | 'openai:gpt-4.1-mini';
-    thumbnail: 'gemini:gemini-3.1-flash-image' | 'gemini:gemini-2.5-flash-image' | 'openai:gpt-image-2.5-flare' | 'openai:gpt-image-2.5-sunburst';
+    thumbnail: ThumbnailModel;
     thumbnailResolution: '1K' | '2K' | '4K';
   };
   contentLanguage: {

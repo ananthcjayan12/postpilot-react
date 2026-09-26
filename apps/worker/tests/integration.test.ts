@@ -1,3 +1,4 @@
+import { defaultSettings } from '@postpilot/shared';
 import {
   env,
   applyD1Migrations,
@@ -233,9 +234,38 @@ describe('session and API boundaries', () => {
     await call(`/api/posts/${post.id}`, 'PUT', { ...input, thumbnailText: '', thumbnailIdeas: '' });
     expect(await reopened()).toMatchObject({ thumbnailText: '', thumbnailIdeas: '' });
   });
+  it.each([
+    ['gemini-3-pro-image', '1K'], ['gemini-3-pro-image', '2K'],
+    ['gemini-3-pro-image', '4K'], ['gemini-3.1-flash-lite-image', '1K'],
+  ])('saves and routes %s thumbnails at %s', async (model, resolution) => {
+    await saveCredential(e, user, 'gemini', { apiKey: 'test-gemini-key' });
+    const preferences = { ...defaultSettings, aiRoutes: { ...defaultSettings.aiRoutes, thumbnail: `gemini:${model}`, thumbnailResolution: resolution } };
+    expect((await call('/api/settings', 'PUT', preferences)).status).toBe(200);
+    expect((await (await call('/api/settings')).json() as any).aiRoutes.thumbnail).toBe(`gemini:${model}`);
+    mockProvider('https://generativelanguage.googleapis.com/v1beta/interactions', { steps: [
+      { type: 'thought', content: [{ type: 'image', data: 'AQ==', mime_type: 'image/png' }] },
+      { type: 'model_output', content: [{ type: 'image', data: 'AQIDBA==', mime_type: 'image/png' }] },
+    ] }, 'POST');
+    const response = await call('/api/ai/thumbnail', 'POST', { title: 'Test video', thumbnailText: 'Exact headline', orientation: 'vertical' });
+    expect(response.status).toBe(201);
+    expect(await response.json()).toMatchObject({ model, resolution, size: 4 });
+    const request = vi.mocked(fetch).mock.calls.find(([url]) => String(url).includes('/interactions'))!;
+    const body = JSON.parse(request[1]!.body as string);
+    expect(body.model).toBe(model);
+    expect(body.response_format.aspect_ratio).toBe('9:16');
+    expect(body.response_format.image_size).toBe(model === 'gemini-3-pro-image' ? resolution : undefined);
+  });
+  it.each(['2K', '4K'])('rejects unsupported Lite resolution %s when saving and generating', async (resolution) => {
+    const preferences = { ...defaultSettings, aiRoutes: { ...defaultSettings.aiRoutes, thumbnail: 'gemini:gemini-3.1-flash-lite-image', thumbnailResolution: resolution } };
+    expect((await call('/api/settings', 'PUT', preferences)).status).toBe(400);
+    await saveCredential(e, user, 'gemini', { apiKey: 'test-gemini-key' });
+    await e.DB.prepare('INSERT INTO settings VALUES(?,?)').bind(user, JSON.stringify(preferences)).run();
+    expect((await call('/api/ai/thumbnail', 'POST', { title: 'Test', thumbnailText: 'Headline' })).status).toBe(400);
+    expect(fetch).not.toHaveBeenCalled();
+  });
   it('passes image ideas and regeneration comments to thumbnail generation', async () => {
     await saveCredential(e, user, 'gemini', { apiKey: 'test-gemini-key' });
-    mockProvider('https://generativelanguage.googleapis.com/v1beta/interactions', { steps: [{ content: [{ type: 'image', data: 'AQIDBA==', mime_type: 'image/png' }] }] }, 'POST');
+    mockProvider('https://generativelanguage.googleapis.com/v1beta/interactions', { steps: [{ type: 'model_output', content: [{ type: 'image', data: 'AQIDBA==', mime_type: 'image/png' }] }] }, 'POST');
     const response = await call('/api/ai/thumbnail', 'POST', { title: 'Test video', thumbnailText: 'Exact headline', imageIdeas: 'Warm lighting', regenerationFeedback: 'More room around the headline' });
     expect(response.status).toBe(201);
     const request = vi.mocked(fetch).mock.calls.find(([url]) => String(url).includes('/interactions'))!;

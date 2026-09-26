@@ -36,6 +36,12 @@ export const thumbnailPeopleOptions = {
   east_asian: 'East Asian', southeast_asian: 'Southeast Asian', middle_eastern: 'Middle Eastern', latino: 'Latino / Latina', diverse: 'Diverse mix', none: 'No people',
 } as const;
 export const thumbnailPeopleSchema = z.enum(['auto', 'indian', 'western', 'african', 'chinese', 'east_asian', 'southeast_asian', 'middle_eastern', 'latino', 'diverse', 'none']);
+// Gemini image capabilities: https://ai.google.dev/gemini-api/docs/image-generation
+export const thumbnailModelSchema = z.enum(['gemini:gemini-3.1-flash-image', 'gemini:gemini-3-pro-image', 'gemini:gemini-3.1-flash-lite-image', 'gemini:gemini-2.5-flash-image', 'openai:gpt-image-2.5-flare', 'openai:gpt-image-2.5-sunburst']);
+export type ThumbnailModel = z.infer<typeof thumbnailModelSchema>;
+export function thumbnailIs1KOnly(model: string) {
+  return model === 'gemini:gemini-2.5-flash-image' || model === 'gemini:gemini-3.1-flash-lite-image';
+}
 export const settingsInput = z.object({
   youtube: z.boolean(),
   instagram: z.boolean(),
@@ -50,7 +56,7 @@ export const settingsInput = z.object({
     metadata: z.enum(['gemini:gemini-3.8-flash', 'gemini:gemini-2.5-flash']),
     hashtags: z.enum(['gemini:gemini-3.8-flash', 'gemini:gemini-2.5-flash', 'openai:gpt-5-mini', 'openai:gpt-4.1-mini']),
     thumbnailCopy: z.enum(['gemini:gemini-3.8-flash', 'gemini:gemini-2.5-flash', 'openai:gpt-5-mini', 'openai:gpt-4.1-mini']),
-    thumbnail: z.enum(['gemini:gemini-3.1-flash-image', 'gemini:gemini-2.5-flash-image', 'openai:gpt-image-2.5-flare', 'openai:gpt-image-2.5-sunburst']),
+    thumbnail: thumbnailModelSchema,
     thumbnailResolution: z.enum(['1K', '2K', '4K']),
   }).default({
     metadata: 'gemini:gemini-3.8-flash',

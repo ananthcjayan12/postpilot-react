@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import type { AppEnv, MediaRow } from './env';
 import { AppError, getCredential } from './lib';
-import { defaultSettings, thumbnailPeopleSchema, thumbnailPeopleOptions } from '@postpilot/shared';
+import { defaultSettings, thumbnailPeopleSchema, thumbnailPeopleOptions, thumbnailIs1KOnly } from '@postpilot/shared';
 import { requireSession } from './auth';
 
 export const gemini = new Hono<AppEnv>();
@@ -341,8 +341,8 @@ gemini.post('/thumbnail', async (c) => {
   const value = socialInput.parse(await c.req.json()), user = c.get('user').id;
   const route = routed((await routes(c.env, user)).thumbnail), key = await providerKey(c.env, user, route.provider);
   const resolution = (await routes(c.env, user)).thumbnailResolution as '1K' | '2K' | '4K';
-  if (route.model === 'gemini-2.5-flash-image' && resolution !== '1K')
-    throw new AppError('Gemini 2.5 Flash Image supports only the default 1K output.');
+  if (thumbnailIs1KOnly(`${route.provider}:${route.model}`) && resolution !== '1K')
+    throw new AppError('The selected thumbnail model supports only 1K output.');
   const reference = await referenceImage(c.env, user, value.referenceMediaId);
   const copy = value.thumbnailText
     ? { text: value.thumbnailText, route: routed((await routes(c.env, user)).thumbnailCopy) }
@@ -373,9 +373,9 @@ gemini.post('/thumbnail', async (c) => {
     input.push({ type: 'text', text: reference ? `${prompt} ${referenceDirection}` : prompt });
     const body = await googleJson('https://generativelanguage.googleapis.com/v1beta/interactions', key, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: route.model, input, response_format: { type: 'image', aspect_ratio: aspectRatio, ...(route.model === 'gemini-2.5-flash-image' ? {} : { image_size: resolution }) } }),
+      body: JSON.stringify({ model: route.model, input, response_format: { type: 'image', aspect_ratio: aspectRatio, ...(thumbnailIs1KOnly(`${route.provider}:${route.model}`) ? {} : { image_size: resolution }) } }),
     });
-    const part = body?.steps?.flatMap((step: any) => step.content || []).find((item: any) => item.type === 'image' && item.data);
+    const part = body?.steps?.filter((step: any) => step.type === 'model_output').flatMap((step: any) => step.content || []).find((item: any) => item.type === 'image' && item.data);
     data = part?.data || ''; mime = part?.mime_type || mime;
   } else {
     let response: Response;

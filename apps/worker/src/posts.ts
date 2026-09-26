@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { postInput, settingsInput, defaultSettings, shortsEligibility } from '@postpilot/shared';
+import { postInput, settingsInput, defaultSettings, shortsEligibility, thumbnailIs1KOnly } from '@postpilot/shared';
 import type { AppEnv, Env, PostRow, Target } from './env';
 import { AppError, getCredential, now, saveCredential } from './lib';
 import { requireSession } from './auth';
@@ -379,8 +379,8 @@ api.get('/settings', async (c) => {
 api.put('/settings', async (c) => {
   const value = settingsInput.parse(await c.req.json());
   const { geminiApiKey, openaiApiKey, ...preferences } = value;
-  if (preferences.aiRoutes.thumbnail === 'gemini:gemini-2.5-flash-image' && preferences.aiRoutes.thumbnailResolution !== '1K')
-    throw new AppError('Gemini 2.5 Flash Image supports only the default 1K output.');
+  if (thumbnailIs1KOnly(preferences.aiRoutes.thumbnail) && preferences.aiRoutes.thumbnailResolution !== '1K')
+    throw new AppError('The selected thumbnail model supports only 1K output.');
   if (geminiApiKey) await saveCredential(c.env, c.get('user').id, 'gemini', { apiKey: geminiApiKey });
   if (geminiApiKey === null) await c.env.DB.prepare('DELETE FROM credentials WHERE user_id=? AND provider=?').bind(c.get('user').id, 'gemini').run();
   if (openaiApiKey) await saveCredential(c.env, c.get('user').id, 'openai', { apiKey: openaiApiKey });
