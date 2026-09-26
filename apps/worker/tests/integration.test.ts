@@ -215,6 +215,36 @@ describe('session and API boundaries', () => {
       expect((await response.json() as any).youtubeFormat).toBe('short');
     }
   });
+  it('round-trips thumbnail writing through draft creation, edits, legacy saves, and clearing', async () => {
+    const { media } = await seed();
+    const input = { title: 'Thumbnail draft', mediaId: media.id, platforms: ['youtube'], action: 'draft' };
+    const created = await call('/api/posts', 'POST', { ...input, thumbnailText: 'A new discovery', thumbnailIdeas: 'Warm lighting' });
+    expect(created.status).toBe(201);
+    const post: any = await created.json();
+    expect(post.thumbnailText).toBe('A new discovery');
+    expect(post.thumbnailIdeas).toBe('Warm lighting');
+    const reopened = async () => ((await (await call('/api/posts')).json()) as any[]).find((item) => item.id === post.id);
+    expect((await reopened()).thumbnailText).toBe('A new discovery');
+    expect((await call(`/api/posts/${post.id}`, 'PUT', { ...input, thumbnailText: 'Updated headline', thumbnailIdeas: 'Blue backdrop' })).status).toBe(200);
+    expect((await reopened()).thumbnailIdeas).toBe('Blue backdrop');
+    await call(`/api/posts/${post.id}`, 'PUT', input);
+    expect((await reopened()).thumbnailText).toBe('Updated headline');
+    expect((await call(`/api/posts/${post.id}`, 'PUT', { ...input, thumbnailText: 'x'.repeat(101) })).status).toBe(400);
+    await call(`/api/posts/${post.id}`, 'PUT', { ...input, thumbnailText: '', thumbnailIdeas: '' });
+    expect(await reopened()).toMatchObject({ thumbnailText: '', thumbnailIdeas: '' });
+  });
+  it('passes image ideas and regeneration comments to thumbnail generation', async () => {
+    await saveCredential(e, user, 'gemini', { apiKey: 'test-gemini-key' });
+    mockProvider('https://generativelanguage.googleapis.com/v1beta/interactions', { steps: [{ content: [{ type: 'image', data: 'AQIDBA==', mime_type: 'image/png' }] }] }, 'POST');
+    const response = await call('/api/ai/thumbnail', 'POST', { title: 'Test video', thumbnailText: 'Exact headline', imageIdeas: 'Warm lighting', regenerationFeedback: 'More room around the headline' });
+    expect(response.status).toBe(201);
+    const request = vi.mocked(fetch).mock.calls.find(([url]) => String(url).includes('/interactions'))!;
+    const body = JSON.parse(request[1]!.body as string);
+    const prompt = body.input.find((part: any) => part.type === 'text').text;
+    expect(prompt).toContain('Warm lighting');
+    expect(prompt).toContain('More room around the headline');
+    expect((await response.json() as any).thumbnailText).toBe('Exact headline');
+  });
   it('updates a resumed draft without creating a duplicate post', async () => {
     const { post, media } = await seed();
     const response = await call('/api/posts/' + post.id, 'PUT', {

@@ -84,8 +84,8 @@ export const api = {
     request<{ hashtags: string; provider: string; model: string }>('/api/ai/hashtags', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title, caption }) }),
   generateThumbnailCopy: (title: string, caption: string, feedback?: string) =>
     request<{ thumbnailText: string; provider: string; model: string }>('/api/ai/thumbnail-copy', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title, caption, feedback }) }),
-  generateThumbnail: (title: string, caption: string, orientation: 'horizontal' | 'vertical', referenceMediaId?: string, thumbnailText?: string, referenceMode: 'preserve' | 'style' = 'style', preserveReferenceBranding = false) =>
-    request<MediaAsset & { provider: string; model: string; thumbnailText: string; orientation: string }>('/api/ai/thumbnail', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title, caption, orientation, referenceMediaId, thumbnailText, referenceMode, preserveReferenceBranding }) }),
+  generateThumbnail: (title: string, caption: string, orientation: 'horizontal' | 'vertical', referenceMediaId?: string, thumbnailText?: string, referenceMode: 'preserve' | 'style' = 'style', preserveReferenceBranding = false, imageIdeas?: string, regenerationFeedback?: string) =>
+    request<MediaAsset & { provider: string; model: string; thumbnailText: string; orientation: string }>('/api/ai/thumbnail', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title, caption, orientation, referenceMediaId, thumbnailText, referenceMode, preserveReferenceBranding, imageIdeas, regenerationFeedback }) }),
   media: () => request<MediaAsset[]>('/api/media'),
   deleteMedia: (id: string) => request<{ ok: true }>(`/api/media/${id}`, { method: 'DELETE' }),
   accounts: () => request<AccountsResponse>('/api/accounts'),
@@ -164,6 +164,8 @@ export const api = {
     videoMetadata?: { width: number; height: number; duration: number };
     hashtags?: string;
     thumbnailMediaId?: string | null;
+    thumbnailText?: string;
+    thumbnailIdeas?: string;
   }) =>
     request<PostRecord>('/api/posts', {
       method: 'POST',
@@ -181,6 +183,8 @@ export const api = {
     videoMetadata?: { width: number; height: number; duration: number };
     hashtags?: string;
     thumbnailMediaId?: string | null;
+    thumbnailText?: string;
+    thumbnailIdeas?: string;
   }) => request<PostRecord>(`/api/posts/${id}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },

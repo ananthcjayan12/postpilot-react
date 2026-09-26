@@ -28,6 +28,8 @@ export const postInput = z.object({
   videoMetadata: videoMetadataSchema.optional(),
   hashtags: z.string().max(1000).default(''),
   thumbnailMediaId: z.string().uuid().nullable().optional(),
+  thumbnailText: z.string().max(100).optional(),
+  thumbnailIdeas: z.string().max(1000).optional(),
 });
 export const thumbnailPeopleOptions = {
   auto: 'Automatic', indian: 'Indian', western: 'Western', african: 'African', chinese: 'Chinese',

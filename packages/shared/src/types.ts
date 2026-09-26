@@ -34,6 +34,8 @@ export interface PostRecord {
   youtubeFormat?: 'video' | 'short';
   hashtags?: string;
   thumbnailMediaId?: string;
+  thumbnailText?: string;
+  thumbnailIdeas?: string;
   targetStatuses: Partial<Record<Platform, 'pending' | 'uploading' | 'processing' | 'sending' | 'success' | 'failed' | 'review' | 'deleted'>>;
 }
 

@@ -1,0 +1,2 @@
+ALTER TABLE posts ADD COLUMN thumbnail_text TEXT NOT NULL DEFAULT '';
+ALTER TABLE posts ADD COLUMN thumbnail_ideas TEXT NOT NULL DEFAULT '';

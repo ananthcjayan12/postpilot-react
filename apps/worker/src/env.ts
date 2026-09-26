@@ -39,6 +39,8 @@ export type PostRow = {
   last_error: string | null;
   hashtags: string | null;
   thumbnail_media_id: string | null;
+  thumbnail_text?: string;
+  thumbnail_ideas?: string;
 };
 export type MediaRow = {
   id: string;

@@ -38,6 +38,8 @@ export async function postJson(env: Env, p: PostRow, suppliedTargets?: Target[])
     youtubeFormat: youtubeData.youtubeFormat || 'video',
     hashtags: p.hashtags || '',
     thumbnailMediaId: p.thumbnail_media_id || undefined,
+    thumbnailText: p.thumbnail_text || '',
+    thumbnailIdeas: p.thumbnail_ideas || '',
     targetStatuses: Object.fromEntries(targets.map((t) => [t.platform, t.status])),
   };
 }
@@ -80,7 +82,7 @@ api.post('/posts', async (c) => {
     status = v.action === 'draft' ? 'draft' : v.action === 'schedule' ? 'scheduled' : 'publishing';
   const statements = [
     c.env.DB.prepare(
-      'INSERT INTO posts(id,user_id,media_id,title,caption,status,scheduled_for,created_at,updated_at,attempts,hashtags,thumbnail_media_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',
+      'INSERT INTO posts(id,user_id,media_id,title,caption,status,scheduled_for,created_at,updated_at,attempts,hashtags,thumbnail_media_id,thumbnail_text,thumbnail_ideas) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
     ).bind(
       id,
       user,
@@ -94,6 +96,8 @@ api.post('/posts', async (c) => {
       v.action === 'publish' ? 1 : 0,
       v.hashtags,
       v.thumbnailMediaId || null,
+      v.thumbnailText ?? '',
+      v.thumbnailIdeas ?? '',
     ),
     ...v.platforms.map((p) =>
       c.env.DB.prepare('INSERT INTO targets(post_id,platform,data) VALUES(?,?,?)').bind(
@@ -156,7 +160,7 @@ api.put('/posts/:id', async (c) => {
   const time = now();
   await c.env.DB.batch([
     c.env.DB.prepare(
-      'UPDATE posts SET media_id=?,title=?,caption=?,status=?,scheduled_for=?,updated_at=?,last_error=NULL,hashtags=?,thumbnail_media_id=? WHERE id=? AND user_id=?',
+      'UPDATE posts SET media_id=?,title=?,caption=?,status=?,scheduled_for=?,updated_at=?,last_error=NULL,hashtags=?,thumbnail_media_id=?,thumbnail_text=?,thumbnail_ideas=? WHERE id=? AND user_id=?',
     ).bind(
       v.mediaId,
       v.title,
@@ -166,6 +170,8 @@ api.put('/posts/:id', async (c) => {
       time,
       v.hashtags,
       v.thumbnailMediaId || null,
+      v.thumbnailText ?? post.thumbnail_text ?? '',
+      v.thumbnailIdeas ?? post.thumbnail_ideas ?? '',
       id,
       user,
     ),
