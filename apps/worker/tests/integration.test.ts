@@ -263,6 +263,30 @@ describe('session and API boundaries', () => {
     expect((await call('/api/ai/thumbnail', 'POST', { title: 'Test', thumbnailText: 'Headline' })).status).toBe(400);
     expect(fetch).not.toHaveBeenCalled();
   });
+  it.each(['gemini', 'openai'])('preserves the exact Malayalam headline for %s', async (provider) => {
+    await saveCredential(e, user, provider, { apiKey: 'test-image-key' });
+    await e.DB.prepare('INSERT INTO settings VALUES(?,?)').bind(user, JSON.stringify({ ...defaultSettings, aiRoutes: { ...defaultSettings.aiRoutes, thumbnail: provider === 'gemini' ? 'gemini:gemini-3-pro-image' : 'openai:gpt-image-2.5-flare' } })).run();
+    const headline = '  പല്ലിൽ കമ്പിയിടാമോ? “Braces” — ഏത് പ്രായത്തിലും!  ';
+    const url = provider === 'gemini' ? 'https://generativelanguage.googleapis.com/v1beta/interactions' : 'https://api.openai.com/v1/images/generations';
+    mockProvider(url, provider === 'gemini' ? { steps: [{ type: 'model_output', content: [{ type: 'image', data: 'AQIDBA==', mime_type: 'image/png' }] }] } : { data: [{ b64_json: 'AQIDBA==' }] }, 'POST');
+    const response = await call('/api/ai/thumbnail', 'POST', { title: 'Different video title', thumbnailText: headline });
+    expect(response.status).toBe(201);
+    expect((await response.json() as any).thumbnailText).toBe(headline);
+    const request = vi.mocked(fetch).mock.calls.find(([input]) => String(input) === url)!;
+    const body = JSON.parse(request[1]!.body as string);
+    const prompt = provider === 'gemini' ? body.input.find((part: any) => part.type === 'text').text : body.prompt;
+    expect(prompt).toContain(JSON.stringify(headline));
+    expect(prompt).toContain('Copy it verbatim');
+    expect(prompt).toContain('Malayalam-capable typeface');
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+  it('rejects an oversized generated headline instead of truncating Malayalam', async () => {
+    await saveCredential(e, user, 'gemini', { apiKey: 'test-image-key' });
+    mockProvider('https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent', { candidates: [{ content: { parts: [{ text: 'മലയാളം '.repeat(20) }] } }] }, 'POST');
+    const response = await call('/api/ai/thumbnail-copy', 'POST', { title: 'Test' });
+    expect(response.status).toBe(502);
+    expect(await response.text()).toContain('shorter headline');
+  });
   it('passes image ideas and regeneration comments to thumbnail generation', async () => {
     await saveCredential(e, user, 'gemini', { apiKey: 'test-gemini-key' });
     mockProvider('https://generativelanguage.googleapis.com/v1beta/interactions', { steps: [{ type: 'model_output', content: [{ type: 'image', data: 'AQIDBA==', mime_type: 'image/png' }] }] }, 'POST');

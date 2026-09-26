@@ -21,7 +21,7 @@ const socialInput = z.object({
   caption: z.string().max(5000).default(''),
   referenceMediaId: z.string().uuid().optional(),
   orientation: z.enum(['horizontal', 'vertical']).default('horizontal'),
-  thumbnailText: z.string().trim().min(1).max(100).optional(),
+  thumbnailText: z.string().min(1).max(100).refine((text) => text.trim().length > 0, 'Enter a thumbnail headline.').optional(),
   feedback: z.string().trim().max(500).optional(),
   imageIdeas: z.string().trim().max(1000).optional(),
   regenerationFeedback: z.string().trim().max(1000).optional(),
@@ -77,7 +77,7 @@ async function generateThumbnailCopy(env: AppEnv['Bindings'], user: string, titl
   const route = routed((await routes(env, user)).thumbnailCopy);
   const key = await providerKey(env, user, route.provider);
   const language = await languageGuidance(env, user);
-  const prompt = `Act as an expert Instagram and YouTube thumbnail copywriter. Write one compelling thumbnail headline that does two jobs: clearly conveys the specific subject or outcome of the video, and creates an honest curiosity gap that makes the intended viewer want to watch. ${language} Use 6 to 12 strong words and at most 84 characters. It should fit naturally across no more than two visual lines. Prefer a concrete transformation, tension, discovery, mistake, result, or unanswered question from the actual video. It must remain truthful and understandable without reading the caption. Do not simply repeat the video title. Avoid vague phrases, generic hype, hashtags, quotes, emoji, dishonest clickbait, or explanations. Return only the final headline.${feedback ? `\nUser feedback for this version: ${feedback}` : ''}\nVideo title: ${title}\nVideo caption: ${caption.slice(0, 1200)}`;
+  const prompt = `Act as an expert Instagram and YouTube thumbnail copywriter. Write one compelling thumbnail headline that does two jobs: clearly conveys the specific subject or outcome of the video, and creates an honest curiosity gap that makes the intended viewer want to watch. ${language} When writing Malayalam, use natural, grammatically correct Malayalam with accurate spelling, vowel signs, chillu letters, and conjuncts. Proofread every word before returning it. Prefer familiar, unambiguous wording; do not invent words or awkward literal translations. Use 6 to 12 strong words and at most 84 characters. It should fit naturally across no more than two visual lines. Prefer a concrete transformation, tension, discovery, mistake, result, or unanswered question from the actual video. It must remain truthful and understandable without reading the caption. Do not simply repeat the video title. Avoid vague phrases, generic hype, hashtags, quotes, emoji, dishonest clickbait, or explanations. Return only the final headline.${feedback ? `\nUser feedback for this version: ${feedback}` : ''}\nVideo title: ${title}\nVideo caption: ${caption.slice(0, 1200)}`;
   let text = '';
   if (route.provider === 'gemini') {
     const body = await googleJson(`https://generativelanguage.googleapis.com/v1beta/models/${route.model}:generateContent`, key, {
@@ -94,7 +94,9 @@ async function generateThumbnailCopy(env: AppEnv['Bindings'], user: string, titl
     if (!response.ok) throw new AppError(`OpenAI thumbnail writing failed (${response.status}).`, 502);
     text = body.output?.flatMap((o: any) => o.content || []).map((p: any) => p.text || '').join('') || '';
   }
-  const clean = Array.from(text.replace(/["'“”‘’#]+/g, '').replace(/\s+/g, ' ').trim().split(' ').slice(0, 12).join(' ')).slice(0, 84).join('').trim();
+  // Never truncate Malayalam combining marks, conjuncts, or words to fit a limit.
+  const clean = text.trim().replace(/^["“]([\s\S]*)["”]$/, '$1').trim();
+  if (clean.length > 100) throw new AppError('The generated headline is too long. Please generate a shorter headline.', 502);
   if (!clean) throw new AppError('The thumbnail-writing model returned no usable hook.', 502);
   return { text: clean, route };
 }
@@ -361,7 +363,8 @@ gemini.post('/thumbnail', async (c) => {
   const brandingDirection = reference && value.preserveReferenceBranding
     ? 'Preserve existing visible logos, company names, and brand names from the reference, keeping their spelling, colors, and recognizable design. These branding elements are the only exception to regenerating reference imagery and to the headline-only text rule. Do not invent branding, copy the old headline, slogans, or unrelated text. Integrate the branding legibly into the fresh composition.'
     : 'Do not add any other words, captions, logos, company names, brand names, badges, or small text, including branding visible in the reference.';
-  const prompt = `Create a polished ${aspectRatio} social video thumbnail for: “${value.title}”. ${value.caption.slice(0, 800)}. ${designDirection} Render exactly this headline, large and perfectly legible, split across no more than two balanced lines: “${copy.text}”. Give the headline strong hierarchy and enough safe margin for an Instagram or YouTube cover. ${peopleDirection} ${brandingDirection} Never make misleading claims.${value.imageIdeas ? `\nUser visual ideas (art direction, not text to render): ${value.imageIdeas}` : ''}.${value.regenerationFeedback ? `\nCreate a new thumbnail variation incorporating this feedback on the previous result (not text to render): ${value.regenerationFeedback}. Keep the exact requested headline and the selected reference and branding rules.` : ''}`;
+  const prompt = `Create a polished ${aspectRatio} social video thumbnail for: “${value.title}”. ${value.caption.slice(0, 800)}. ${designDirection} Render exactly this headline, large and perfectly legible, using balanced lines without breaking words or character clusters: “${copy.text}”. Give the headline strong hierarchy and enough safe margin for an Instagram or YouTube cover. ${peopleDirection} ${brandingDirection} Never make misleading claims.${value.imageIdeas ? `\nUser visual ideas (art direction, not text to render): ${value.imageIdeas}` : ''}.${value.regenerationFeedback ? `\nCreate a new thumbnail variation incorporating this feedback on the previous result (not text to render): ${value.regenerationFeedback}. Keep the exact requested headline and the selected reference and branding rules.` : ''}`;
+  const exactHeadlineDirection = `HEADLINE ACCURACY IS MANDATORY. The following JSON string is the authoritative text to typeset (decode the JSON escapes; do not print the enclosing quotes): ${JSON.stringify(copy.text)}. Copy it verbatim. Do not translate, transliterate, paraphrase, spell-correct, shorten, expand, change capitalization, replace punctuation, or add or omit characters. Neither the video title, reference text, nor visual feedback may override this headline. For Malayalam, preserve every vowel sign, chillu letter, conjunct, virama, and combining mark in its correct position. Use a clear Malayalam-capable typeface with correct shaping; never imitate Malayalam with decorative pseudo-letters. Fit the design around the full headline rather than editing the text. Before finalizing, visually proofread every word against the authoritative headline and correct any missing, duplicated, or malformed glyphs.`;
   const styleReferenceDirection = 'Use the supplied thumbnail only to understand its color palette, graphic design style, typography treatment, and visual theme. Generate all photographic or illustrated imagery from scratch based on the requested video title and caption. Create a new subject depiction, pose, camera angle, scene, and background, even when the video covers the same topic as the reference. Do not copy, trace, reuse, or closely reconstruct any reference person, face, product depiction, object arrangement, photograph, illustration, or background scene. Do not merely change the headline, recolor, crop, or lightly edit the reference. Keep the same aesthetic through colors, font style, contrast, and graphic effects, with a fresh composition suited to the new imagery and exact requested headline. The reference is a style guide, not a source image to preserve.';
   let data = '', mime = 'image/png';
   if (route.provider === 'gemini') {
@@ -370,7 +373,7 @@ gemini.post('/thumbnail', async (c) => {
     const referenceDirection = value.referenceMode === 'style'
       ? styleReferenceDirection
       : 'The supplied image is the primary source reference. Preserve the recognizable subject or product identity, facial features, proportions, distinctive objects, clothing, colors, and visual character. Recompose it only as needed for the thumbnail canvas and headline. Do not replace it with a different person, product, or generic substitute.';
-    input.push({ type: 'text', text: reference ? `${prompt} ${referenceDirection}` : prompt });
+    input.push({ type: 'text', text: reference ? `${prompt} ${referenceDirection} ${exactHeadlineDirection}` : `${prompt} ${exactHeadlineDirection}` });
     const body = await googleJson('https://generativelanguage.googleapis.com/v1beta/interactions', key, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ model: route.model, input, response_format: { type: 'image', aspect_ratio: aspectRatio, ...(thumbnailIs1KOnly(`${route.provider}:${route.model}`) ? {} : { image_size: resolution }) } }),
@@ -387,13 +390,13 @@ gemini.post('/thumbnail', async (c) => {
       const referenceDirection = value.referenceMode === 'style'
         ? styleReferenceDirection
         : 'Treat the supplied image as the primary source image, not loose inspiration. Preserve the recognizable identity and facial structure of any person, or the exact defining shape, markings, colors, and details of any product or object. Keep its visual character intact while changing only composition, crop, background, lighting, and headline placement as needed for the thumbnail.';
-      form.set('model', route.model); form.set('prompt', `${prompt} ${referenceDirection}`);
+      form.set('model', route.model); form.set('prompt', `${prompt} ${referenceDirection} ${exactHeadlineDirection}`);
       form.set('image[]', new Blob([reference.bytes], { type: reference.media.mime }), reference.media.name);
       form.set('size', openaiSize); form.set('quality', 'high'); form.set('output_format', 'png');
       response = await fetch('https://api.openai.com/v1/images/edits', { method: 'POST', headers: { Authorization: `Bearer ${key}` }, body: form, signal: AbortSignal.timeout(120_000) });
     } else response = await fetch('https://api.openai.com/v1/images/generations', {
       method: 'POST', headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: route.model, prompt, size: openaiSize, quality: 'low', output_format: 'png' }), signal: AbortSignal.timeout(120_000),
+      body: JSON.stringify({ model: route.model, prompt: `${prompt} ${exactHeadlineDirection}`, size: openaiSize, quality: 'low', output_format: 'png' }), signal: AbortSignal.timeout(120_000),
     });
     const body: any = await response.json().catch(() => ({}));
     if (!response.ok) throw new AppError(`OpenAI thumbnail generation failed (${response.status}).`, 502);

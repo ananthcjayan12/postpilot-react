@@ -2,6 +2,7 @@ import { CalendarClock, Check, CloudUpload, Facebook, Instagram, LoaderCircle, P
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api';
+import { prepareReferenceImage } from '../lib/referenceImage';
 import { shortsEligibility, type VideoMetadata } from '@postpilot/shared';
 import type { AccountsResponse, MediaAsset, Platform } from '../lib/types';
 
@@ -122,9 +123,8 @@ export function CreatePost() {
   const chooseReference = async (file?: File) => {
     if (!file || busy) return;
     if (!file.type.startsWith('image/')) return setError('Reference must be an image.');
-    if (file.size > 10 * 1024 * 1024) return setError('Reference image must be 10 MB or smaller.');
-    setBusy('Uploading reference image…'); setError('');
-    try { setReferenceImage(await api.upload(file)); } catch (e: any) { setError(e.message); } finally { setBusy(''); }
+    setBusy('Optimizing reference image…'); setError('');
+    try { const optimized = await prepareReferenceImage(file); setBusy('Uploading optimized reference…'); setReferenceImage(await api.upload(optimized)); } catch (e: any) { setError(e.message); } finally { setBusy(''); }
   };
   const submit = async (action: 'draft' | 'schedule' | 'publish') => {
     setError('');
@@ -216,10 +216,10 @@ export function CreatePost() {
               <div className="reference-picker">
                 <div className="reference-summary">
                   {referenceImage && <img src={referenceImage.localUrl} alt="AI reference" />}
-                  <div><strong>Optional reference image</strong><p>Keep its colors, design style, and visual theme while creating fresh imagery.</p></div>
+                  <div><strong>Optional reference image</strong><p>Keep its colors, design style, and visual theme while creating fresh imagery. References are resized to at most 1280 px and compressed to 400 KB before upload.</p></div>
                 </div>
                 <div className="asset-actions">
-                  <label className="btn secondary small">Choose reference<input type="file" accept="image/*" hidden disabled={!!busy} onChange={(e) => void chooseReference(e.target.files?.[0])}/></label>
+                  <label className="btn secondary small">Choose reference<input type="file" accept="image/jpeg,image/png,image/webp" hidden disabled={!!busy} onChange={(e) => void chooseReference(e.target.files?.[0])}/></label>
                   {referenceImage && <button className="btn secondary small" disabled={!!busy} onClick={() => setReferenceImage(null)}>Remove reference</button>}
                 </div>
                 {referenceImage && <>
