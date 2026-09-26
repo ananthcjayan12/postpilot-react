@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import type { AppEnv, MediaRow } from './env';
 import { AppError, getCredential } from './lib';
+import { defaultSettings } from '@postpilot/shared';
 import { requireSession } from './auth';
 
 export const gemini = new Hono<AppEnv>();
@@ -16,9 +17,9 @@ const suggestionsSchema = z.object({
   description: z.string().trim().min(1).max(5000),
 });
 const socialInput = z.object({
-  provider: z.enum(['gemini', 'openai']),
   title: z.string().trim().min(1).max(100),
   caption: z.string().max(5000).default(''),
+  referenceMediaId: z.string().uuid().optional(),
 });
 function decodeBase64(value: string) {
   const binary = atob(value), bytes = new Uint8Array(binary.length);
@@ -29,6 +30,29 @@ async function providerKey(env: AppEnv['Bindings'], user: string, provider: 'gem
   const key = (await getCredential(env, user, provider))?.value?.apiKey;
   if (!key) throw new AppError(`Add your ${provider === 'openai' ? 'OpenAI' : 'Gemini'} API key in Settings first.`);
   return key as string;
+}
+async function routes(env: AppEnv['Bindings'], user: string) {
+  const row = await env.DB.prepare('SELECT data FROM settings WHERE user_id=?').bind(user).first<{ data: string }>();
+  const saved = row ? JSON.parse(row.data) : {};
+  return { ...defaultSettings.aiRoutes, ...(saved.aiRoutes || {}) };
+}
+function routed(value: string) {
+  const [provider, ...model] = value.split(':');
+  return { provider: provider as 'gemini' | 'openai', model: model.join(':') };
+}
+async function referenceImage(env: AppEnv['Bindings'], user: string, id?: string) {
+  if (!id) return undefined;
+  const media = await env.DB.prepare("SELECT * FROM media WHERE id=? AND user_id=? AND mime LIKE 'image/%'").bind(id, user).first<MediaRow>();
+  if (!media) throw new AppError('Reference image not found.', 404);
+  if (media.size > 10 * 1024 * 1024) throw new AppError('Reference image must be 10 MB or smaller.');
+  const object = await env.MEDIA.get(media.object_key);
+  if (!object) throw new AppError('Reference image is missing from storage.', 404);
+  return { media, bytes: new Uint8Array(await object.arrayBuffer()) };
+}
+function encodeBase64(bytes: Uint8Array) {
+  let value = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) value += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(value);
 }
 
 function logGemini(event: string, fields: Record<string, unknown> = {}) {
@@ -189,8 +213,9 @@ gemini.post('/suggest', async (c) => {
     const formatGuidance = value.youtubeFormat === 'short'
       ? 'This is intended as a YouTube Short. Use a punchy title, front-load the hook, and keep it concise.'
       : 'This is intended as a standard YouTube video. Optimize for search intent without clickbait.';
+    const metadataRoute = routed((await routes(c.env, user)).metadata);
     const generated = await googleJson(
-      'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent',
+      `https://generativelanguage.googleapis.com/v1beta/models/${metadataRoute.model}:generateContent`,
       apiKey,
       {
         method: 'POST',
@@ -236,11 +261,12 @@ gemini.post('/suggest', async (c) => {
 });
 
 gemini.post('/hashtags', async (c) => {
-  const value = socialInput.parse(await c.req.json()), key = await providerKey(c.env, c.get('user').id, value.provider);
+  const value = socialInput.parse(await c.req.json()), user = c.get('user').id;
+  const route = routed((await routes(c.env, user)).hashtags), key = await providerKey(c.env, user, route.provider);
   const prompt = `Create 12 relevant Instagram hashtags for this video. Return only a single space-separated line of hashtags, each beginning with #. Avoid banned, misleading, or unrelated tags.\nTitle: ${value.title}\nCaption: ${value.caption}`;
   let text = '';
-  if (value.provider === 'gemini') {
-    const body = await googleJson('https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent', key, {
+  if (route.provider === 'gemini') {
+    const body = await googleJson(`https://generativelanguage.googleapis.com/v1beta/models/${route.model}:generateContent`, key, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
     });
@@ -248,7 +274,7 @@ gemini.post('/hashtags', async (c) => {
   } else {
     const response = await fetch('https://api.openai.com/v1/responses', {
       method: 'POST', headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: 'gpt-5-mini', input: prompt }), signal: AbortSignal.timeout(120_000),
+      body: JSON.stringify({ model: route.model, input: prompt }), signal: AbortSignal.timeout(120_000),
     });
     const body: any = await response.json().catch(() => ({}));
     if (!response.ok) throw new AppError(`OpenAI hashtag generation failed (${response.status}).`, 502);
@@ -256,25 +282,40 @@ gemini.post('/hashtags', async (c) => {
   }
   const hashtags = (text.match(/#[\p{L}\p{N}_]+/gu) || []).slice(0, 30).join(' ');
   if (!hashtags) throw new AppError('The AI provider returned no usable hashtags.', 502);
-  return c.json({ hashtags });
+  return c.json({ hashtags, ...route });
 });
 
 gemini.post('/thumbnail', async (c) => {
   const value = socialInput.parse(await c.req.json()), user = c.get('user').id;
-  const key = await providerKey(c.env, user, value.provider);
+  const route = routed((await routes(c.env, user)).thumbnail), key = await providerKey(c.env, user, route.provider);
+  const resolution = (await routes(c.env, user)).thumbnailResolution as '1K' | '2K' | '4K';
+  if (route.model === 'gemini-2.5-flash-image' && resolution !== '1K')
+    throw new AppError('Gemini 2.5 Flash Image supports only the default 1K output.');
+  const reference = await referenceImage(c.env, user, value.referenceMediaId);
   const prompt = `Create a polished 16:9 social video thumbnail for: “${value.title}”. ${value.caption.slice(0, 800)}. High contrast, clear focal subject, minimal composition, no logos, no misleading claims, and no text unless it is perfectly legible.`;
   let data = '', mime = 'image/png';
-  if (value.provider === 'gemini') {
-    const body = await googleJson('https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-image:generateContent', key, {
+  if (route.provider === 'gemini') {
+    const input: any[] = [];
+    if (reference) input.push({ type: 'image', mime_type: reference.media.mime, data: encodeBase64(reference.bytes) });
+    input.push({ type: 'text', text: reference ? `${prompt} Use the supplied image as a visual reference for subject, composition, colors, or style while creating a new thumbnail.` : prompt });
+    const body = await googleJson('https://generativelanguage.googleapis.com/v1beta/interactions', key, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { responseModalities: ['TEXT', 'IMAGE'], responseFormat: { image: { aspectRatio: '16:9', imageSize: '1K' } } } }),
+      body: JSON.stringify({ model: route.model, input, response_format: { type: 'image', aspect_ratio: '16:9', ...(route.model === 'gemini-2.5-flash-image' ? {} : { image_size: resolution }) } }),
     });
-    const part = body?.candidates?.[0]?.content?.parts?.find((p: any) => p.inlineData?.data);
-    data = part?.inlineData?.data || ''; mime = part?.inlineData?.mimeType || mime;
+    const part = body?.steps?.flatMap((step: any) => step.content || []).find((item: any) => item.type === 'image' && item.data);
+    data = part?.data || ''; mime = part?.mime_type || mime;
   } else {
-    const response = await fetch('https://api.openai.com/v1/images/generations', {
+    let response: Response;
+    const openaiSize = { '1K': '1376x768', '2K': '2048x1152', '4K': '3840x2160' }[resolution];
+    if (reference) {
+      const form = new FormData();
+      form.set('model', route.model); form.set('prompt', `${prompt} Use the supplied image as a visual reference.`);
+      form.set('image[]', new Blob([reference.bytes], { type: reference.media.mime }), reference.media.name);
+      form.set('size', openaiSize); form.set('quality', 'low'); form.set('output_format', 'png');
+      response = await fetch('https://api.openai.com/v1/images/edits', { method: 'POST', headers: { Authorization: `Bearer ${key}` }, body: form, signal: AbortSignal.timeout(120_000) });
+    } else response = await fetch('https://api.openai.com/v1/images/generations', {
       method: 'POST', headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: 'gpt-image-2.5-flare', prompt, size: '1536x1024', quality: 'low', output_format: 'png' }), signal: AbortSignal.timeout(120_000),
+      body: JSON.stringify({ model: route.model, prompt, size: openaiSize, quality: 'low', output_format: 'png' }), signal: AbortSignal.timeout(120_000),
     });
     const body: any = await response.json().catch(() => ({}));
     if (!response.ok) throw new AppError(`OpenAI thumbnail generation failed (${response.status}).`, 502);
@@ -282,9 +323,9 @@ gemini.post('/thumbnail', async (c) => {
   }
   if (!data) throw new AppError('The AI provider returned no image.', 502);
   const bytes = decodeBase64(data), id = crypto.randomUUID(), objectKey = `${user}/${id}`;
-  if (bytes.byteLength > 15 * 1024 * 1024) throw new AppError('Generated thumbnail is too large.', 502);
+  if (bytes.byteLength > 40 * 1024 * 1024) throw new AppError('Generated thumbnail is too large.', 502);
   await c.env.MEDIA.put(objectKey, bytes, { httpMetadata: { contentType: mime } });
   await c.env.DB.prepare('INSERT INTO media(id,user_id,object_key,name,mime,size,created_at) VALUES(?,?,?,?,?,?,?)')
     .bind(id, user, objectKey, `ai-thumbnail-${id}.png`, mime, bytes.byteLength, new Date().toISOString()).run();
-  return c.json({ id, originalName: `AI thumbnail (${value.provider})`, fileName: objectKey, mimeType: mime, size: bytes.byteLength, createdAt: new Date().toISOString(), localUrl: `/media-files/${id}` }, 201);
+  return c.json({ id, originalName: `AI thumbnail (${route.provider}, ${resolution})`, fileName: objectKey, mimeType: mime, size: bytes.byteLength, createdAt: new Date().toISOString(), localUrl: `/media-files/${id}`, ...route, resolution }, 201);
 });

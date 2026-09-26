@@ -367,11 +367,14 @@ api.get('/settings', async (c) => {
     .first<{ data: string }>();
   const geminiConfigured = !!(await getCredential(c.env, c.get('user').id, 'gemini'));
   const openaiConfigured = !!(await getCredential(c.env, c.get('user').id, 'openai'));
-  return c.json({ ...(row ? { ...defaultSettings, ...JSON.parse(row.data) } : defaultSettings), geminiConfigured, openaiConfigured });
+  const saved = row ? JSON.parse(row.data) : {};
+  return c.json({ ...defaultSettings, ...saved, aiRoutes: { ...defaultSettings.aiRoutes, ...(saved.aiRoutes || {}) }, geminiConfigured, openaiConfigured });
 });
 api.put('/settings', async (c) => {
   const value = settingsInput.parse(await c.req.json());
   const { geminiApiKey, openaiApiKey, ...preferences } = value;
+  if (preferences.aiRoutes.thumbnail === 'gemini:gemini-2.5-flash-image' && preferences.aiRoutes.thumbnailResolution !== '1K')
+    throw new AppError('Gemini 2.5 Flash Image supports only the default 1K output.');
   if (geminiApiKey) await saveCredential(c.env, c.get('user').id, 'gemini', { apiKey: geminiApiKey });
   if (geminiApiKey === null) await c.env.DB.prepare('DELETE FROM credentials WHERE user_id=? AND provider=?').bind(c.get('user').id, 'gemini').run();
   if (openaiApiKey) await saveCredential(c.env, c.get('user').id, 'openai', { apiKey: openaiApiKey });
