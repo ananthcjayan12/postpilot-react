@@ -82,7 +82,7 @@ export const api = {
     request<{ hashtags: string; provider: string; model: string }>('/api/ai/hashtags', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title, caption }) }),
   generateThumbnailCopy: (title: string, caption: string, feedback?: string) =>
     request<{ thumbnailText: string; provider: string; model: string }>('/api/ai/thumbnail-copy', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title, caption, feedback }) }),
-  generateThumbnail: (title: string, caption: string, orientation: 'horizontal' | 'vertical', referenceMediaId?: string, thumbnailText?: string, referenceMode: 'preserve' | 'style' = 'preserve') =>
+  generateThumbnail: (title: string, caption: string, orientation: 'horizontal' | 'vertical', referenceMediaId?: string, thumbnailText?: string, referenceMode: 'preserve' | 'style' = 'style') =>
     request<MediaAsset & { provider: string; model: string; thumbnailText: string; orientation: string }>('/api/ai/thumbnail', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title, caption, orientation, referenceMediaId, thumbnailText, referenceMode }) }),
   media: () => request<MediaAsset[]>('/api/media'),
   deleteMedia: (id: string) => request<{ ok: true }>(`/api/media/${id}`, { method: 'DELETE' }),

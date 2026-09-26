@@ -23,7 +23,7 @@ const socialInput = z.object({
   orientation: z.enum(['horizontal', 'vertical']).default('horizontal'),
   thumbnailText: z.string().trim().min(1).max(100).optional(),
   feedback: z.string().trim().max(500).optional(),
-  referenceMode: z.enum(['preserve', 'style']).default('preserve'),
+  referenceMode: z.enum(['preserve', 'style']).default('style'),
 });
 function decodeBase64(value: string) {
   const binary = atob(value), bytes = new Uint8Array(binary.length);
@@ -345,13 +345,16 @@ gemini.post('/thumbnail', async (c) => {
     ? { text: value.thumbnailText, route: routed((await routes(c.env, user)).thumbnailCopy) }
     : await generateThumbnailCopy(c.env, user, value.title, value.caption, value.feedback);
   const aspectRatio = value.orientation === 'vertical' ? '9:16' : '16:9';
-  const prompt = `Create a polished ${aspectRatio} social video thumbnail for: “${value.title}”. ${value.caption.slice(0, 800)}. Use one clear focal subject and an uncluttered high-contrast composition. Render exactly this headline, large and perfectly legible, split across no more than two balanced lines: “${copy.text}”. Give the headline strong hierarchy and enough safe margin for an Instagram or YouTube cover. Do not add any other words, captions, logos, badges, or small text. Keep ample negative space and never make misleading claims.`;
+  const designDirection = reference && value.referenceMode === 'style'
+    ? 'Follow the reference composition and design system instead of inventing a new composition.'
+    : 'Use one clear focal subject and an uncluttered high-contrast composition with ample negative space.';
+  const prompt = `Create a polished ${aspectRatio} social video thumbnail for: “${value.title}”. ${value.caption.slice(0, 800)}. ${designDirection} Render exactly this headline, large and perfectly legible, split across no more than two balanced lines: “${copy.text}”. Give the headline strong hierarchy and enough safe margin for an Instagram or YouTube cover. Do not add any other words, captions, logos, badges, or small text. Never make misleading claims.`;
   let data = '', mime = 'image/png';
   if (route.provider === 'gemini') {
     const input: any[] = [];
     if (reference) input.push({ type: 'image', mime_type: reference.media.mime, data: encodeBase64(reference.bytes) });
     const referenceDirection = value.referenceMode === 'style'
-      ? 'Use the supplied image as the primary style reference. Closely match its palette, lighting, texture, visual medium, mood, and composition language while applying them to the requested thumbnail subject.'
+      ? `Treat the supplied image as a strict design template, not loose inspiration. Recreate its overall layout, typography category, font weight and character, text scale, capitalization style, color palette, gradients, contrast, spacing, alignment, framing, borders, shadows, graphic shapes, image treatment, and visual hierarchy as closely as possible. Preserve the same design language and relative placement of elements. Replace only the original subject matter and original words with the requested video subject and the exact new headline. Adapt the crop only where required for the ${aspectRatio} canvas. Do not invent a different art direction, random background, unrelated colors, or a generic thumbnail layout.`
       : 'The supplied image is the primary source reference. Preserve the recognizable subject or product identity, facial features, proportions, distinctive objects, clothing, colors, and visual character. Recompose it only as needed for the thumbnail canvas and headline. Do not replace it with a different person, product, or generic substitute.';
     input.push({ type: 'text', text: reference ? `${prompt} ${referenceDirection}` : prompt });
     const body = await googleJson('https://generativelanguage.googleapis.com/v1beta/interactions', key, {
@@ -368,7 +371,7 @@ gemini.post('/thumbnail', async (c) => {
     if (reference) {
       const form = new FormData();
       const referenceDirection = value.referenceMode === 'style'
-        ? 'Use the supplied image as the primary style reference. Closely reproduce its palette, lighting, texture, visual medium, mood, and composition language while applying them to the requested thumbnail.'
+        ? `Treat the supplied image as a strict design template, not loose inspiration. Recreate its overall layout, typography category, font weight and character, text scale, capitalization style, color palette, gradients, contrast, spacing, alignment, framing, borders, shadows, graphic shapes, image treatment, and visual hierarchy as closely as possible. Preserve the same design language and relative placement of elements. Replace only the original subject matter and original words with the requested video subject and the exact new headline. Adapt the crop only where required for the ${aspectRatio} canvas. Do not invent a different art direction, random background, unrelated colors, or a generic thumbnail layout.`
         : 'Treat the supplied image as the primary source image, not loose inspiration. Preserve the recognizable identity and facial structure of any person, or the exact defining shape, markings, colors, and details of any product or object. Keep its visual character intact while changing only composition, crop, background, lighting, and headline placement as needed for the thumbnail.';
       form.set('model', route.model); form.set('prompt', `${prompt} ${referenceDirection}`);
       form.set('image[]', new Blob([reference.bytes], { type: reference.media.mime }), reference.media.name);
