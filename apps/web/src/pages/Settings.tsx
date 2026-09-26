@@ -11,9 +11,12 @@ export function Settings() {
     confirm: true,
     schedulerEnabled: true,
     geminiConfigured: false,
+    openaiConfigured: false,
   });
   const [geminiApiKey, setGeminiApiKey] = useState('');
   const [removeKey, setRemoveKey] = useState(false);
+  const [openaiApiKey, setOpenaiApiKey] = useState('');
+  const [removeOpenaiKey, setRemoveOpenaiKey] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -27,8 +30,8 @@ export function Settings() {
   const save = async () => {
     setSaving(true);
     try {
-      setDefaults(await api.saveSettings({ ...defaults, geminiApiKey: removeKey ? null : geminiApiKey.trim() || undefined }));
-      setGeminiApiKey(''); setRemoveKey(false);
+      setDefaults(await api.saveSettings({ ...defaults, geminiApiKey: removeKey ? null : geminiApiKey.trim() || undefined, openaiApiKey: removeOpenaiKey ? null : openaiApiKey.trim() || undefined }));
+      setGeminiApiKey(''); setRemoveKey(false); setOpenaiApiKey(''); setRemoveOpenaiKey(false);
       setSaved(true);
       setError('');
       setTimeout(() => setSaved(false), 1800);
@@ -58,6 +61,16 @@ export function Settings() {
             <label className="field"><span>Gemini API key {defaults.geminiConfigured ? '(configured)' : ''}</span><input className="input" type="password" autoComplete="new-password" disabled={loading || saving || removeKey} value={geminiApiKey} onChange={(event) => setGeminiApiKey(event.target.value)} placeholder={defaults.geminiConfigured ? 'Leave blank to keep the current key' : 'Enter your Gemini API key'} /></label>
             <a className="inline-link" href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer">Get a key from Google AI Studio ↗</a>
             {defaults.geminiConfigured && <Toggle label="Remove saved key when saving" checked={removeKey} onChange={setRemoveKey} />}
+          </div>
+        </section>
+        <section className="panel settings-card wide-card">
+          <div className="settings-icon purple"><Sparkles /></div>
+          <div className="settings-content">
+            <h2>OpenAI image & hashtag generation</h2>
+            <p>Generate social thumbnails and Instagram hashtags. Your key is encrypted and never returned to the browser.</p>
+            <label className="field"><span>OpenAI API key {defaults.openaiConfigured ? '(configured)' : ''}</span><input className="input" type="password" autoComplete="new-password" disabled={loading || saving || removeOpenaiKey} value={openaiApiKey} onChange={(event) => setOpenaiApiKey(event.target.value)} placeholder={defaults.openaiConfigured ? 'Leave blank to keep the current key' : 'Enter your OpenAI API key'} /></label>
+            <a className="inline-link" href="https://platform.openai.com/api-keys" target="_blank" rel="noreferrer">Manage OpenAI API keys ↗</a>
+            {defaults.openaiConfigured && <Toggle label="Remove saved key when saving" checked={removeOpenaiKey} onChange={setRemoveOpenaiKey} />}
           </div>
         </section>
         <section className="panel settings-card">

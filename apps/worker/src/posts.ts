@@ -36,6 +36,9 @@ export async function postJson(env: Env, p: PostRow, suppliedTargets?: Target[])
         }),
     ),
     youtubeFormat: youtubeData.youtubeFormat || 'video',
+    hashtags: p.hashtags || '',
+    thumbnailMediaId: p.thumbnail_media_id || undefined,
+    targetStatuses: Object.fromEntries(targets.map((t) => [t.platform, t.status])),
   };
 }
 api.get('/posts', async (c) => {
@@ -61,6 +64,10 @@ api.post('/posts', async (c) => {
     .bind(v.mediaId, user)
     .first<{ id: string; mime: string }>();
   if (!media) throw new AppError('Select an uploaded media asset.');
+  if (v.thumbnailMediaId) {
+    const thumbnail = await c.env.DB.prepare("SELECT id FROM media WHERE id=? AND user_id=? AND mime LIKE 'image/%'").bind(v.thumbnailMediaId, user).first();
+    if (!thumbnail) throw new AppError('Select a valid thumbnail image.');
+  }
   if (v.platforms.includes('youtube') && v.youtubeFormat === 'short') {
     if (!media.mime.startsWith('video/')) throw new AppError('YouTube Shorts require a video.');
     const error = shortsEligibility(v.videoMetadata);
@@ -73,7 +80,7 @@ api.post('/posts', async (c) => {
     status = v.action === 'draft' ? 'draft' : v.action === 'schedule' ? 'scheduled' : 'publishing';
   const statements = [
     c.env.DB.prepare(
-      'INSERT INTO posts(id,user_id,media_id,title,caption,status,scheduled_for,created_at,updated_at,attempts) VALUES(?,?,?,?,?,?,?,?,?,?)',
+      'INSERT INTO posts(id,user_id,media_id,title,caption,status,scheduled_for,created_at,updated_at,attempts,hashtags,thumbnail_media_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',
     ).bind(
       id,
       user,
@@ -85,6 +92,8 @@ api.post('/posts', async (c) => {
       time,
       time,
       v.action === 'publish' ? 1 : 0,
+      v.hashtags,
+      v.thumbnailMediaId || null,
     ),
     ...v.platforms.map((p) =>
       c.env.DB.prepare('INSERT INTO targets(post_id,platform,data) VALUES(?,?,?)').bind(
@@ -133,6 +142,10 @@ api.put('/posts/:id', async (c) => {
     .bind(v.mediaId, user)
     .first<{ id: string; mime: string }>();
   if (!media) throw new AppError('Select an uploaded media asset.');
+  if (v.thumbnailMediaId) {
+    const thumbnail = await c.env.DB.prepare("SELECT id FROM media WHERE id=? AND user_id=? AND mime LIKE 'image/%'").bind(v.thumbnailMediaId, user).first();
+    if (!thumbnail) throw new AppError('Select a valid thumbnail image.');
+  }
   if (v.platforms.includes('youtube') && v.youtubeFormat === 'short') {
     if (!media.mime.startsWith('video/')) throw new AppError('YouTube Shorts require a video.');
     const error = shortsEligibility(v.videoMetadata);
@@ -143,7 +156,7 @@ api.put('/posts/:id', async (c) => {
   const time = now();
   await c.env.DB.batch([
     c.env.DB.prepare(
-      'UPDATE posts SET media_id=?,title=?,caption=?,status=?,scheduled_for=?,updated_at=?,last_error=NULL WHERE id=? AND user_id=?',
+      'UPDATE posts SET media_id=?,title=?,caption=?,status=?,scheduled_for=?,updated_at=?,last_error=NULL,hashtags=?,thumbnail_media_id=? WHERE id=? AND user_id=?',
     ).bind(
       v.mediaId,
       v.title,
@@ -151,6 +164,8 @@ api.put('/posts/:id', async (c) => {
       v.action === 'schedule' ? 'scheduled' : 'draft',
       v.action === 'schedule' ? v.scheduledFor! : null,
       time,
+      v.hashtags,
+      v.thumbnailMediaId || null,
       id,
       user,
     ),
@@ -252,6 +267,22 @@ api.post('/posts/:id/targets/:platform/resolve', async (c) => {
     .run();
   return c.json({ ok: true, confirmation });
 });
+api.delete('/posts/:id/targets/:platform', async (c) => {
+  const id = c.req.param('id'), platform = c.req.param('platform'), user = c.get('user').id;
+  if (!['youtube', 'instagram', 'facebook'].includes(platform)) throw new AppError('Unknown provider.', 404);
+  const target = await c.env.DB.prepare('SELECT t.* FROM targets t JOIN posts p ON p.id=t.post_id WHERE t.post_id=? AND t.platform=? AND p.user_id=?')
+    .bind(id, platform, user).first<Target>();
+  if (!target) throw new AppError('Provider result not found.', 404);
+  const data = JSON.parse(target.data || '{}');
+  if (!data.id) throw new AppError('This provider has no published item to delete.', 409);
+  const { deletePublishedTarget } = await import('./publish');
+  await deletePublishedTarget(c.env, user, platform, data.id);
+  await c.env.DB.prepare("UPDATE targets SET status='deleted',error=NULL,data=? WHERE post_id=? AND platform=?")
+    .bind(JSON.stringify({ ...data, deletedAt: now() }), id, platform).run();
+  await c.env.DB.prepare("UPDATE posts SET status=CASE WHEN EXISTS(SELECT 1 FROM targets WHERE post_id=? AND status='success') THEN 'partial' ELSE 'failed' END,updated_at=? WHERE id=?")
+    .bind(id, now(), id).run();
+  return c.json({ ok: true });
+});
 api.get('/accounts', async (c) => {
   const user = c.get('user').id,
     rows = (
@@ -335,19 +366,22 @@ api.get('/settings', async (c) => {
     .bind(c.get('user').id)
     .first<{ data: string }>();
   const geminiConfigured = !!(await getCredential(c.env, c.get('user').id, 'gemini'));
-  return c.json({ ...(row ? { ...defaultSettings, ...JSON.parse(row.data) } : defaultSettings), geminiConfigured });
+  const openaiConfigured = !!(await getCredential(c.env, c.get('user').id, 'openai'));
+  return c.json({ ...(row ? { ...defaultSettings, ...JSON.parse(row.data) } : defaultSettings), geminiConfigured, openaiConfigured });
 });
 api.put('/settings', async (c) => {
   const value = settingsInput.parse(await c.req.json());
-  const { geminiApiKey, ...preferences } = value;
+  const { geminiApiKey, openaiApiKey, ...preferences } = value;
   if (geminiApiKey) await saveCredential(c.env, c.get('user').id, 'gemini', { apiKey: geminiApiKey });
   if (geminiApiKey === null) await c.env.DB.prepare('DELETE FROM credentials WHERE user_id=? AND provider=?').bind(c.get('user').id, 'gemini').run();
+  if (openaiApiKey) await saveCredential(c.env, c.get('user').id, 'openai', { apiKey: openaiApiKey });
+  if (openaiApiKey === null) await c.env.DB.prepare('DELETE FROM credentials WHERE user_id=? AND provider=?').bind(c.get('user').id, 'openai').run();
   await c.env.DB.prepare(
     'INSERT INTO settings(user_id,data) VALUES(?,?) ON CONFLICT(user_id) DO UPDATE SET data=excluded.data',
   )
     .bind(c.get('user').id, JSON.stringify(preferences))
     .run();
-  return c.json({ ...preferences, geminiConfigured: geminiApiKey ? true : !!(await getCredential(c.env, c.get('user').id, 'gemini')) });
+  return c.json({ ...preferences, geminiConfigured: geminiApiKey ? true : !!(await getCredential(c.env, c.get('user').id, 'gemini')), openaiConfigured: openaiApiKey ? true : !!(await getCredential(c.env, c.get('user').id, 'openai')) });
 });
 export async function dispatch(env: Env) {
   const due = (

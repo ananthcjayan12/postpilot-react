@@ -1,9 +1,9 @@
-import { Edit3, FileImage, FileVideo2, Play, Search, Upload } from 'lucide-react';
+import { Edit3, FileImage, FileVideo2, Search, Trash2, Upload } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useVisibleRefresh } from '../lib/poll';
-import type { MediaAsset, PostRecord } from '../lib/types';
+import type { MediaAsset, Platform, PostRecord } from '../lib/types';
 import { StatusPill } from '../components/StatusPill';
 
 export function Library() {
@@ -28,6 +28,16 @@ export function Library() {
     } catch (e: any) {
       setError(e.message);
     }
+  };
+  const removeProvider = async (post: PostRecord, platform: Platform) => {
+    if (!window.confirm(`Delete this video from ${platform}? This cannot be undone.`)) return;
+    try { await api.deleteProviderPost(post.id, platform); setPosts(await api.posts()); setError(''); }
+    catch (e: any) { setError(e.message); }
+  };
+  const removeMedia = async (asset: MediaAsset) => {
+    if (!window.confirm(`Delete ${asset.originalName} from R2 storage? Any projects using this file will also be removed. This cannot be undone.`)) return;
+    try { await api.deleteMedia(asset.id); setMedia(await api.media()); setError(''); }
+    catch (e: any) { setError(e.message); }
   };
   useVisibleRefresh(() =>
     Promise.all([api.media(), api.posts()]).then(([m, p]) => {
@@ -89,75 +99,35 @@ export function Library() {
           </div>
         </div>
         {visible.length ? (
-          <div className="media-grid">
+          <div className="library-table-wrap"><table className="library-table">
+            <thead><tr><th>Media</th><th>Project</th><th>YouTube</th><th>Instagram</th><th>Facebook</th><th>Actions</th></tr></thead>
+            <tbody>
             {visible.map((asset) => {
               const post = postByMedia.get(asset.id);
               const resumable = post && ['draft', 'scheduled'].includes(post.status);
               const destination = resumable ? `/create/${post.id}` : `/create?mediaId=${asset.id}`;
               return (
-                <article className="media-card" key={asset.id}>
-                  <Link className="media-thumb" to={destination} aria-label={resumable ? `Resume ${post.title}` : `Create a project from ${asset.originalName}`}>
+                <tr key={asset.id}>
+                  <td><Link className="table-media" to={destination} aria-label={resumable ? `Resume ${post.title}` : `Create a project from ${asset.originalName}`}>
                     {asset.mimeType.startsWith('video/') ? (
-                      <>
-                        <video src={asset.localUrl} muted />
-                        <span className="media-play">
-                          <Play size={18} fill="currentColor" />
-                        </span>
-                      </>
+                      <video src={asset.localUrl} muted />
                     ) : (
                       <img src={asset.localUrl} alt="" />
                     )}
-                    <span className="media-type">
-                      {asset.mimeType.startsWith('video/') ? (
-                        <FileVideo2 size={13} />
-                      ) : (
-                        <FileImage size={13} />
-                      )}
-                      {asset.mimeType.split('/')[0]}
-                    </span>
-                  </Link>
-                  <div className="media-card-body">
-                    <div className="media-card-title">
-                      <div>
-                        <strong><Link to={destination}>{post?.title || asset.originalName}</Link></strong>
-                        <span>
-                          {new Date(asset.createdAt).toLocaleDateString()} ·{' '}
-                          {(asset.size / 1024 / 1024).toFixed(1)} MB
-                        </span>
-                      </div>
-                      <Link className="icon-button ghost" to={destination} title={resumable ? 'Resume project' : 'Use this media'}><Edit3 /></Link>
-                    </div>
-                    {post ? (
-                      <>
-                        <StatusPill status={post.status} />
-                        {post.lastError && <p className="muted tiny">{post.lastError}</p>}
-                        {['failed', 'partial'].includes(post.status) && (
-                          <>
-                            <button className="btn secondary small" onClick={() => void retry(post.id)}>
-                              Retry failed channels
-                            </button>
-                            <button className="btn secondary small" onClick={() => void review(post)}>
-                              Resolve uncertain result
-                            </button>
-                          </>
-                        )}
-                        {post.status === 'draft' && (
-                          <><Link className="btn secondary small" to={destination}>Resume project</Link><button className="btn secondary small" onClick={() => void publish(post.id)}>Publish draft</button></>
-                        )}
-                        {post.status === 'scheduled' && <Link className="btn secondary small" to={destination}>Edit scheduled post</Link>}
-                      </>
-                    ) : (
-                      <span className="status-pill draft">
-                        <i />
-                        asset only
-                      </span>
-                    )}
-                    {!resumable && <Link className="btn secondary small" to={destination}>Use in new project</Link>}
-                  </div>
-                </article>
+                  </Link><span className="table-file">{asset.mimeType.startsWith('video/') ? <FileVideo2/> : <FileImage/>}<span>{asset.originalName}<small>{(asset.size / 1024 / 1024).toFixed(1)} MB · {new Date(asset.createdAt).toLocaleDateString()}</small></span></span></td>
+                  <td>{post ? <><strong><Link to={destination}>{post.title}</Link></strong><StatusPill status={post.status}/></> : <span className="status-pill draft"><i/>asset only</span>}</td>
+                  {(['youtube','instagram','facebook'] as Platform[]).map((platform) => {
+                    const status = post?.targetStatuses?.[platform];
+                    return <td key={platform}>{status ? <><StatusPill status={status === 'success' ? 'published' : status as any}/>{status === 'success' && <button className="icon-button danger" title={`Delete from ${platform}`} onClick={() => void removeProvider(post!, platform)}><Trash2/></button>}</> : <span className="muted tiny">—</span>}</td>;
+                  })}
+                  <td><div className="table-actions"><Link className="icon-button ghost" to={destination} title={resumable ? 'Resume project' : 'Use media'}><Edit3/></Link><button className="icon-button danger" title="Delete from R2" onClick={() => void removeMedia(asset)}><Trash2/></button></div>
+                    {post && ['failed','partial'].includes(post.status) && <><button className="btn secondary small" onClick={() => void retry(post.id)}>Retry</button><button className="btn secondary small" onClick={() => void review(post)}>Review</button></>}
+                    {post?.status === 'draft' && <button className="btn secondary small" onClick={() => void publish(post.id)}>Publish</button>}
+                  </td>
+                </tr>
               );
             })}
-          </div>
+            </tbody></table></div>
         ) : (
           <div className="empty-state">
             <Upload />

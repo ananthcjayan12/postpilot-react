@@ -32,6 +32,9 @@ export interface PostRecord {
   attempts: number;
   lastError?: string;
   youtubeFormat?: 'video' | 'short';
+  hashtags?: string;
+  thumbnailMediaId?: string;
+  targetStatuses: Partial<Record<Platform, 'pending' | 'uploading' | 'processing' | 'sending' | 'success' | 'failed' | 'review' | 'deleted'>>;
 }
 
 export interface AccountInfo {

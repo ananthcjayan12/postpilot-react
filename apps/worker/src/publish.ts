@@ -85,6 +85,25 @@ async function delivery(env: Env, id: string) {
   const expires = Date.now() + 2 * 86400000;
   return `${env.APP_ORIGIN}/media-delivery/${id}?${new URLSearchParams({ expires: String(expires), signature: await signMedia(env, id, expires) })}`;
 }
+export async function deletePublishedTarget(env: Env, user: string, platform: string, remoteId: string) {
+  let response: Response;
+  if (platform === 'youtube') {
+    response = await fetch(`https://www.googleapis.com/youtube/v3/videos?${new URLSearchParams({ id: remoteId })}`, {
+      method: 'DELETE', headers: { Authorization: `Bearer ${await googleToken(env, user)}` },
+    });
+  } else if (platform === 'facebook') {
+    const grant = await facebookToken(env, user);
+    response = await fetch(facebookGraph(env, remoteId), {
+      method: 'DELETE', headers: { Authorization: `Bearer ${grant.pageAccessToken}` },
+    });
+  } else {
+    const grant = await instagramGrant(env, user);
+    response = await fetch(instagramGraph(env, remoteId), {
+      method: 'DELETE', headers: { Authorization: `Bearer ${grant.accessToken}` },
+    });
+  }
+  if (!response.ok) await checked(response);
+}
 export async function youtubeChunk(env: Env, post: PostRow, media: MediaRow) {
   let t = await target(env, post.id, 'youtube');
   if (t.status === 'success') return true;
@@ -183,9 +202,9 @@ async function createInstagram(env: Env, post: PostRow, media: MediaRow) {
   if (!grant.userId) throw new NonRetryableError('Instagram connection is missing an account ID.');
   // Container creation itself does not publish. An orphan can expire safely.
   const body = new URLSearchParams({
-    caption: post.caption.slice(0, 2200),
+    caption: `${post.caption}${post.hashtags ? `\n\n${post.hashtags}` : ''}`.slice(0, 2200),
     ...(media.mime.startsWith('video/')
-      ? { media_type: 'REELS', video_url: await delivery(env, media.id), share_to_feed: 'true' }
+      ? { media_type: 'REELS', video_url: await delivery(env, media.id), share_to_feed: 'true', ...(post.thumbnail_media_id ? { cover_url: await delivery(env, post.thumbnail_media_id) } : {}) }
       : { image_url: await delivery(env, media.id) }),
   });
   const result = await checked(

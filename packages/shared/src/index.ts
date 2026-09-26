@@ -26,6 +26,8 @@ export const postInput = z.object({
   scheduledFor: z.string().datetime().optional(),
   youtubeFormat: z.enum(['video', 'short']).default('video'),
   videoMetadata: videoMetadataSchema.optional(),
+  hashtags: z.string().max(1000).default(''),
+  thumbnailMediaId: z.string().uuid().nullable().optional(),
 });
 export const settingsInput = z.object({
   youtube: z.boolean(),
@@ -35,6 +37,7 @@ export const settingsInput = z.object({
   confirm: z.boolean(),
   schedulerEnabled: z.boolean().default(true),
   geminiApiKey: z.string().trim().min(10).max(500).nullable().optional(),
+  openaiApiKey: z.string().trim().min(10).max(500).nullable().optional(),
 });
 export const defaultSettings = {
   youtube: true,

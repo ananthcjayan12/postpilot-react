@@ -191,6 +191,22 @@ media.get('/:id', async (c) => {
   if (!m) throw new AppError('Media not found.', 404);
   return c.json(mediaJson(m));
 });
+media.delete('/:id', async (c) => {
+  const id = c.req.param('id'), user = c.get('user').id;
+  const row = await c.env.DB.prepare('SELECT * FROM media WHERE id=? AND user_id=?').bind(id, user).first<MediaRow>();
+  if (!row) throw new AppError('Media not found.', 404);
+  await c.env.MEDIA.delete(row.object_key);
+  await c.env.DB.batch([
+    c.env.DB.prepare('DELETE FROM attempts WHERE run_id IN (SELECT r.id FROM runs r JOIN posts p ON p.id=r.post_id WHERE p.media_id=? AND p.user_id=?)').bind(id, user),
+    c.env.DB.prepare('DELETE FROM runs WHERE post_id IN (SELECT id FROM posts WHERE media_id=? AND user_id=?)').bind(id, user),
+    c.env.DB.prepare('DELETE FROM targets WHERE post_id IN (SELECT id FROM posts WHERE media_id=? AND user_id=?)').bind(id, user),
+    c.env.DB.prepare('UPDATE posts SET thumbnail_media_id=NULL WHERE thumbnail_media_id=? AND user_id=?').bind(id, user),
+    c.env.DB.prepare('DELETE FROM posts WHERE media_id=? AND user_id=?').bind(id, user),
+    c.env.DB.prepare('DELETE FROM uploads WHERE id=? AND user_id=?').bind(id, user),
+    c.env.DB.prepare('DELETE FROM media WHERE id=? AND user_id=?').bind(id, user),
+  ]);
+  return c.json({ ok: true });
+});
 export async function mediaResponse(request: Request, env: Env, id: string, user?: string) {
   const url = new URL(request.url);
   if (

@@ -15,6 +15,21 @@ const suggestionsSchema = z.object({
   titles: z.array(z.string().trim().min(1).max(100)).length(5),
   description: z.string().trim().min(1).max(5000),
 });
+const socialInput = z.object({
+  provider: z.enum(['gemini', 'openai']),
+  title: z.string().trim().min(1).max(100),
+  caption: z.string().max(5000).default(''),
+});
+function decodeBase64(value: string) {
+  const binary = atob(value), bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+async function providerKey(env: AppEnv['Bindings'], user: string, provider: 'gemini' | 'openai') {
+  const key = (await getCredential(env, user, provider))?.value?.apiKey;
+  if (!key) throw new AppError(`Add your ${provider === 'openai' ? 'OpenAI' : 'Gemini'} API key in Settings first.`);
+  return key as string;
+}
 
 function logGemini(event: string, fields: Record<string, unknown> = {}) {
   console.log({ service: 'gemini', event, ...fields });
@@ -218,4 +233,58 @@ gemini.post('/suggest', async (c) => {
       }).then(() => undefined).catch(() => undefined),
     );
   }
+});
+
+gemini.post('/hashtags', async (c) => {
+  const value = socialInput.parse(await c.req.json()), key = await providerKey(c.env, c.get('user').id, value.provider);
+  const prompt = `Create 12 relevant Instagram hashtags for this video. Return only a single space-separated line of hashtags, each beginning with #. Avoid banned, misleading, or unrelated tags.\nTitle: ${value.title}\nCaption: ${value.caption}`;
+  let text = '';
+  if (value.provider === 'gemini') {
+    const body = await googleJson('https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent', key, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+    });
+    text = body?.candidates?.[0]?.content?.parts?.map((p: any) => p.text || '').join('') || '';
+  } else {
+    const response = await fetch('https://api.openai.com/v1/responses', {
+      method: 'POST', headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: 'gpt-5-mini', input: prompt }), signal: AbortSignal.timeout(120_000),
+    });
+    const body: any = await response.json().catch(() => ({}));
+    if (!response.ok) throw new AppError(`OpenAI hashtag generation failed (${response.status}).`, 502);
+    text = body.output?.flatMap((o: any) => o.content || []).map((p: any) => p.text || '').join('') || '';
+  }
+  const hashtags = (text.match(/#[\p{L}\p{N}_]+/gu) || []).slice(0, 30).join(' ');
+  if (!hashtags) throw new AppError('The AI provider returned no usable hashtags.', 502);
+  return c.json({ hashtags });
+});
+
+gemini.post('/thumbnail', async (c) => {
+  const value = socialInput.parse(await c.req.json()), user = c.get('user').id;
+  const key = await providerKey(c.env, user, value.provider);
+  const prompt = `Create a polished 16:9 social video thumbnail for: “${value.title}”. ${value.caption.slice(0, 800)}. High contrast, clear focal subject, minimal composition, no logos, no misleading claims, and no text unless it is perfectly legible.`;
+  let data = '', mime = 'image/png';
+  if (value.provider === 'gemini') {
+    const body = await googleJson('https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-image:generateContent', key, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { responseModalities: ['TEXT', 'IMAGE'], responseFormat: { image: { aspectRatio: '16:9', imageSize: '1K' } } } }),
+    });
+    const part = body?.candidates?.[0]?.content?.parts?.find((p: any) => p.inlineData?.data);
+    data = part?.inlineData?.data || ''; mime = part?.inlineData?.mimeType || mime;
+  } else {
+    const response = await fetch('https://api.openai.com/v1/images/generations', {
+      method: 'POST', headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: 'gpt-image-2.5-flare', prompt, size: '1536x1024', quality: 'low', output_format: 'png' }), signal: AbortSignal.timeout(120_000),
+    });
+    const body: any = await response.json().catch(() => ({}));
+    if (!response.ok) throw new AppError(`OpenAI thumbnail generation failed (${response.status}).`, 502);
+    data = body?.data?.[0]?.b64_json || '';
+  }
+  if (!data) throw new AppError('The AI provider returned no image.', 502);
+  const bytes = decodeBase64(data), id = crypto.randomUUID(), objectKey = `${user}/${id}`;
+  if (bytes.byteLength > 15 * 1024 * 1024) throw new AppError('Generated thumbnail is too large.', 502);
+  await c.env.MEDIA.put(objectKey, bytes, { httpMetadata: { contentType: mime } });
+  await c.env.DB.prepare('INSERT INTO media(id,user_id,object_key,name,mime,size,created_at) VALUES(?,?,?,?,?,?,?)')
+    .bind(id, user, objectKey, `ai-thumbnail-${id}.png`, mime, bytes.byteLength, new Date().toISOString()).run();
+  return c.json({ id, originalName: `AI thumbnail (${value.provider})`, fileName: objectKey, mimeType: mime, size: bytes.byteLength, createdAt: new Date().toISOString(), localUrl: `/media-files/${id}` }, 201);
 });

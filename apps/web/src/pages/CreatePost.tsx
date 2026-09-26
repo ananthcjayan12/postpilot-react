@@ -19,6 +19,9 @@ export function CreatePost() {
   const [localPreview, setLocalPreview] = useState('');
   const [title, setTitle] = useState('');
   const [caption, setCaption] = useState('');
+  const [hashtags, setHashtags] = useState('');
+  const [thumbnail, setThumbnail] = useState<MediaAsset | null>(null);
+  const [aiProvider, setAiProvider] = useState<'gemini' | 'openai'>('gemini');
   const [suggestions, setSuggestions] = useState<{ titles: string[]; description: string } | null>(null);
   const [videoMetadata, setVideoMetadata] = useState<VideoMetadata>();
   const [youtubeFormat, setYoutubeFormat] = useState<'video' | 'short'>('video');
@@ -42,6 +45,8 @@ export function CreatePost() {
         if (existingAsset) setAsset(existingAsset);
         if (project) {
           setTitle(project.title); setCaption(project.caption); setSelected(project.platforms);
+          setHashtags(project.hashtags || '');
+          if (project.thumbnailMediaId) setThumbnail(media.find((item) => item.id === project.thumbnailMediaId) || null);
           setYoutubeFormat(project.youtubeFormat || 'video');
           if (project.scheduledFor) {
             const date = new Date(project.scheduledFor);
@@ -82,6 +87,24 @@ export function CreatePost() {
     catch (error: any) { setError(error.message); }
     finally { setBusy(''); }
   };
+  const generateHashtags = async () => {
+    if (!title.trim() || busy) return setError('Add a title before generating hashtags.');
+    setBusy(`Generating hashtags with ${aiProvider === 'gemini' ? 'Gemini' : 'OpenAI'}…`); setError('');
+    try { setHashtags((await api.generateHashtags(aiProvider, title, caption)).hashtags); }
+    catch (e: any) { setError(e.message); } finally { setBusy(''); }
+  };
+  const generateThumbnail = async () => {
+    if (!title.trim() || busy) return setError('Add a title before generating a thumbnail.');
+    setBusy(`Generating thumbnail with ${aiProvider === 'gemini' ? 'Gemini' : 'OpenAI'}…`); setError('');
+    try { setThumbnail(await api.generateThumbnail(aiProvider, title, caption)); }
+    catch (e: any) { setError(e.message); } finally { setBusy(''); }
+  };
+  const chooseThumbnail = async (file?: File) => {
+    if (!file || busy) return;
+    if (!file.type.startsWith('image/')) return setError('Thumbnail must be an image.');
+    setBusy('Uploading thumbnail…'); setError('');
+    try { setThumbnail(await api.upload(file)); } catch (e: any) { setError(e.message); } finally { setBusy(''); }
+  };
   const submit = async (action: 'draft' | 'schedule' | 'publish') => {
     setError('');
     if (!asset) return setError('Upload a video or image first.');
@@ -95,7 +118,7 @@ export function CreatePost() {
     if (action === 'publish' && confirmPublish && !window.confirm('Publish this post to the selected accounts?')) return;
     setBusy(action === 'publish' ? 'Publishing to selected platforms…' : action === 'schedule' ? 'Adding to schedule…' : 'Saving draft…');
     try {
-      const input = { title, caption, mediaId: asset.id, platforms: selected, youtubeFormat, videoMetadata, scheduledFor: schedule ? new Date(schedule).toISOString() : undefined };
+      const input = { title, caption, hashtags, thumbnailMediaId: thumbnail?.id || null, mediaId: asset.id, platforms: selected, youtubeFormat, videoMetadata, scheduledFor: schedule ? new Date(schedule).toISOString() : undefined };
       let post;
       if (postId) {
         post = await api.updatePost(postId, { ...input, action: action === 'schedule' ? 'schedule' : 'draft' });
@@ -147,7 +170,12 @@ export function CreatePost() {
           <div className="form-grid">
             <label className="field full"><span>Title</span><input className="input" value={title} maxLength={100} onChange={(e) => setTitle(e.target.value)} placeholder="Exploring Japan — A Visual Journey" /><small>{title.length}/100</small></label>
             <label className="field full"><span>Caption / description</span><textarea className="textarea" value={caption} maxLength={5000} onChange={(e) => setCaption(e.target.value)} placeholder="Tell your audience what this video is about…" /><small>{caption.length}/5000</small></label>
+            {selected.includes('instagram') && <label className="field full"><span>Instagram hashtags</span><textarea className="textarea compact" value={hashtags} maxLength={1000} onChange={(e) => setHashtags(e.target.value)} placeholder="#reels #video #creator" /><small>{hashtags.length}/1000</small></label>}
           </div>
+          {selected.includes('instagram') && <section className="social-assets">
+            <div className="social-ai-row"><label className="field"><span>AI provider</span><select className="input" value={aiProvider} onChange={(e) => setAiProvider(e.target.value as any)}><option value="gemini">Gemini</option><option value="openai">OpenAI</option></select></label><button className="btn secondary" disabled={!!busy || !title.trim()} onClick={() => void generateHashtags()}><Sparkles size={16}/> Generate hashtags</button><button className="btn secondary" disabled={!!busy || !title.trim()} onClick={() => void generateThumbnail()}><Sparkles size={16}/> Generate thumbnail</button></div>
+            <div className="thumbnail-picker">{thumbnail && <img src={thumbnail.localUrl} alt="Selected thumbnail" />}<div><strong>Instagram Reel cover</strong><p>Upload your own image or generate one with AI.</p><label className="btn secondary small">Choose image<input type="file" accept="image/*" hidden onChange={(e) => void chooseThumbnail(e.target.files?.[0])}/></label>{thumbnail && <button className="btn ghost small" onClick={() => setThumbnail(null)}>Remove</button>}</div></div>
+          </section>}
           <div className="ai-hint"><Sparkles size={17} /><span><strong>Tip:</strong> Keep the first 125 characters strong; Instagram truncates long captions in-feed.</span></div>
         </section>
 

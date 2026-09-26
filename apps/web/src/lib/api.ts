@@ -10,6 +10,7 @@ export type Settings = {
   notify: boolean;
   schedulerEnabled: boolean;
   geminiConfigured: boolean;
+  openaiConfigured: boolean;
 };
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
@@ -54,7 +55,7 @@ export const api = {
     location.assign('/login');
   },
   settings: () => request<Settings>('/api/settings'),
-  saveSettings: (value: Settings & { geminiApiKey?: string | null }) =>
+  saveSettings: (value: Settings & { geminiApiKey?: string | null; openaiApiKey?: string | null }) =>
     request<Settings>('/api/settings', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
@@ -66,7 +67,12 @@ export const api = {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ mediaId, youtubeFormat }),
     }),
+  generateHashtags: (provider: 'gemini' | 'openai', title: string, caption: string) =>
+    request<{ hashtags: string }>('/api/ai/hashtags', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ provider, title, caption }) }),
+  generateThumbnail: (provider: 'gemini' | 'openai', title: string, caption: string) =>
+    request<MediaAsset>('/api/ai/thumbnail', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ provider, title, caption }) }),
   media: () => request<MediaAsset[]>('/api/media'),
+  deleteMedia: (id: string) => request<{ ok: true }>(`/api/media/${id}`, { method: 'DELETE' }),
   accounts: () => request<AccountsResponse>('/api/accounts'),
   analytics: () => request<any>('/api/analytics'),
   upload: async (file: File, progress?: (percentage: number) => void) => {
@@ -141,6 +147,8 @@ export const api = {
     scheduledFor?: string;
     youtubeFormat?: 'video' | 'short';
     videoMetadata?: { width: number; height: number; duration: number };
+    hashtags?: string;
+    thumbnailMediaId?: string | null;
   }) =>
     request<PostRecord>('/api/posts', {
       method: 'POST',
@@ -156,6 +164,8 @@ export const api = {
     scheduledFor?: string;
     youtubeFormat?: 'video' | 'short';
     videoMetadata?: { width: number; height: number; duration: number };
+    hashtags?: string;
+    thumbnailMediaId?: string | null;
   }) => request<PostRecord>(`/api/posts/${id}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
@@ -169,6 +179,7 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ outcome, remoteId, confirmation: 'I checked the provider account' }),
     }),
+  deleteProviderPost: (id: string, platform: Platform) => request<{ ok: true }>(`/api/posts/${id}/targets/${platform}`, { method: 'DELETE' }),
   disconnect: (provider: 'google' | 'facebook' | 'instagram') =>
     request<{ ok: true }>(`/api/oauth/${provider}/disconnect`, { method: 'POST' }),
 };
