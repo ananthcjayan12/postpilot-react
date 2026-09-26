@@ -14,6 +14,7 @@ export type Settings = {
   aiRoutes: {
     metadata: 'gemini:gemini-3.8-flash' | 'gemini:gemini-2.5-flash';
     hashtags: 'gemini:gemini-3.8-flash' | 'gemini:gemini-2.5-flash' | 'openai:gpt-5-mini' | 'openai:gpt-4.1-mini';
+    thumbnailCopy: 'gemini:gemini-3.8-flash' | 'gemini:gemini-2.5-flash' | 'openai:gpt-5-mini' | 'openai:gpt-4.1-mini';
     thumbnail: 'gemini:gemini-3.1-flash-image' | 'gemini:gemini-2.5-flash-image' | 'openai:gpt-image-2.5-flare' | 'openai:gpt-image-2.5-sunburst';
     thumbnailResolution: '1K' | '2K' | '4K';
   };
@@ -75,8 +76,8 @@ export const api = {
     }),
   generateHashtags: (title: string, caption: string) =>
     request<{ hashtags: string; provider: string; model: string }>('/api/ai/hashtags', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title, caption }) }),
-  generateThumbnail: (title: string, caption: string, referenceMediaId?: string) =>
-    request<MediaAsset & { provider: string; model: string }>('/api/ai/thumbnail', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title, caption, referenceMediaId }) }),
+  generateThumbnail: (title: string, caption: string, orientation: 'horizontal' | 'vertical', referenceMediaId?: string) =>
+    request<MediaAsset & { provider: string; model: string; thumbnailText: string; orientation: string }>('/api/ai/thumbnail', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title, caption, orientation, referenceMediaId }) }),
   media: () => request<MediaAsset[]>('/api/media'),
   deleteMedia: (id: string) => request<{ ok: true }>(`/api/media/${id}`, { method: 'DELETE' }),
   accounts: () => request<AccountsResponse>('/api/accounts'),

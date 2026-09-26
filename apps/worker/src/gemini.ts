@@ -20,6 +20,7 @@ const socialInput = z.object({
   title: z.string().trim().min(1).max(100),
   caption: z.string().max(5000).default(''),
   referenceMediaId: z.string().uuid().optional(),
+  orientation: z.enum(['horizontal', 'vertical']).default('horizontal'),
 });
 function decodeBase64(value: string) {
   const binary = atob(value), bytes = new Uint8Array(binary.length);
@@ -53,6 +54,30 @@ function encodeBase64(bytes: Uint8Array) {
   let value = '';
   for (let i = 0; i < bytes.length; i += 0x8000) value += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
   return btoa(value);
+}
+async function generateThumbnailCopy(env: AppEnv['Bindings'], user: string, title: string, caption: string) {
+  const route = routed((await routes(env, user)).thumbnailCopy);
+  const key = await providerKey(env, user, route.provider);
+  const prompt = `Write one catchy thumbnail hook for this video. Use 2 to 5 simple words, at most 28 characters total. It must be truthful, specific, instantly readable, and different from the full title. No hashtags, quotes, punctuation, emoji, clickbait, or explanation. Return only the hook.\nTitle: ${title}\nCaption: ${caption.slice(0, 1200)}`;
+  let text = '';
+  if (route.provider === 'gemini') {
+    const body = await googleJson(`https://generativelanguage.googleapis.com/v1beta/models/${route.model}:generateContent`, key, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+    });
+    text = body?.candidates?.[0]?.content?.parts?.map((p: any) => p.text || '').join('') || '';
+  } else {
+    const response = await fetch('https://api.openai.com/v1/responses', {
+      method: 'POST', headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: route.model, input: prompt }), signal: AbortSignal.timeout(120_000),
+    });
+    const body: any = await response.json().catch(() => ({}));
+    if (!response.ok) throw new AppError(`OpenAI thumbnail writing failed (${response.status}).`, 502);
+    text = body.output?.flatMap((o: any) => o.content || []).map((p: any) => p.text || '').join('') || '';
+  }
+  const clean = text.replace(/["'“”‘’#.!?,:;]+/g, '').replace(/\s+/g, ' ').trim().split(' ').slice(0, 5).join(' ').slice(0, 28).trim();
+  if (!clean) throw new AppError('The thumbnail-writing model returned no usable hook.', 502);
+  return { text: clean, route };
 }
 
 function logGemini(event: string, fields: Record<string, unknown> = {}) {
@@ -292,7 +317,9 @@ gemini.post('/thumbnail', async (c) => {
   if (route.model === 'gemini-2.5-flash-image' && resolution !== '1K')
     throw new AppError('Gemini 2.5 Flash Image supports only the default 1K output.');
   const reference = await referenceImage(c.env, user, value.referenceMediaId);
-  const prompt = `Create a polished 16:9 social video thumbnail for: “${value.title}”. ${value.caption.slice(0, 800)}. High contrast, clear focal subject, minimal composition, no logos, no misleading claims, and no text unless it is perfectly legible.`;
+  const copy = await generateThumbnailCopy(c.env, user, value.title, value.caption);
+  const aspectRatio = value.orientation === 'vertical' ? '9:16' : '16:9';
+  const prompt = `Create a polished ${aspectRatio} social video thumbnail for: “${value.title}”. ${value.caption.slice(0, 800)}. Use one clear focal subject and an uncluttered high-contrast composition. Render exactly this single short headline, large and perfectly legible: “${copy.text}”. Do not add any other words, captions, logos, badges, or small text. Keep ample negative space and never make misleading claims.`;
   let data = '', mime = 'image/png';
   if (route.provider === 'gemini') {
     const input: any[] = [];
@@ -300,13 +327,15 @@ gemini.post('/thumbnail', async (c) => {
     input.push({ type: 'text', text: reference ? `${prompt} Use the supplied image as a visual reference for subject, composition, colors, or style while creating a new thumbnail.` : prompt });
     const body = await googleJson('https://generativelanguage.googleapis.com/v1beta/interactions', key, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: route.model, input, response_format: { type: 'image', aspect_ratio: '16:9', ...(route.model === 'gemini-2.5-flash-image' ? {} : { image_size: resolution }) } }),
+      body: JSON.stringify({ model: route.model, input, response_format: { type: 'image', aspect_ratio: aspectRatio, ...(route.model === 'gemini-2.5-flash-image' ? {} : { image_size: resolution }) } }),
     });
     const part = body?.steps?.flatMap((step: any) => step.content || []).find((item: any) => item.type === 'image' && item.data);
     data = part?.data || ''; mime = part?.mime_type || mime;
   } else {
     let response: Response;
-    const openaiSize = { '1K': '1376x768', '2K': '2048x1152', '4K': '3840x2160' }[resolution];
+    const openaiSize = value.orientation === 'vertical'
+      ? { '1K': '768x1376', '2K': '1152x2048', '4K': '2160x3840' }[resolution]
+      : { '1K': '1376x768', '2K': '2048x1152', '4K': '3840x2160' }[resolution];
     if (reference) {
       const form = new FormData();
       form.set('model', route.model); form.set('prompt', `${prompt} Use the supplied image as a visual reference.`);
@@ -327,5 +356,5 @@ gemini.post('/thumbnail', async (c) => {
   await c.env.MEDIA.put(objectKey, bytes, { httpMetadata: { contentType: mime } });
   await c.env.DB.prepare('INSERT INTO media(id,user_id,object_key,name,mime,size,created_at) VALUES(?,?,?,?,?,?,?)')
     .bind(id, user, objectKey, `ai-thumbnail-${id}.png`, mime, bytes.byteLength, new Date().toISOString()).run();
-  return c.json({ id, originalName: `AI thumbnail (${route.provider}, ${resolution})`, fileName: objectKey, mimeType: mime, size: bytes.byteLength, createdAt: new Date().toISOString(), localUrl: `/media-files/${id}`, ...route, resolution }, 201);
+  return c.json({ id, originalName: `AI thumbnail (${route.provider}, ${resolution}, ${value.orientation})`, fileName: objectKey, mimeType: mime, size: bytes.byteLength, createdAt: new Date().toISOString(), localUrl: `/media-files/${id}`, ...route, resolution, orientation: value.orientation, thumbnailText: copy.text, copyModel: copy.route.model }, 201);
 });

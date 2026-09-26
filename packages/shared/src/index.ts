@@ -41,11 +41,13 @@ export const settingsInput = z.object({
   aiRoutes: z.object({
     metadata: z.enum(['gemini:gemini-3.8-flash', 'gemini:gemini-2.5-flash']),
     hashtags: z.enum(['gemini:gemini-3.8-flash', 'gemini:gemini-2.5-flash', 'openai:gpt-5-mini', 'openai:gpt-4.1-mini']),
+    thumbnailCopy: z.enum(['gemini:gemini-3.8-flash', 'gemini:gemini-2.5-flash', 'openai:gpt-5-mini', 'openai:gpt-4.1-mini']),
     thumbnail: z.enum(['gemini:gemini-3.1-flash-image', 'gemini:gemini-2.5-flash-image', 'openai:gpt-image-2.5-flare', 'openai:gpt-image-2.5-sunburst']),
     thumbnailResolution: z.enum(['1K', '2K', '4K']),
   }).default({
     metadata: 'gemini:gemini-3.8-flash',
     hashtags: 'gemini:gemini-3.8-flash',
+    thumbnailCopy: 'gemini:gemini-3.8-flash',
     thumbnail: 'gemini:gemini-3.1-flash-image',
     thumbnailResolution: '1K',
   }),
@@ -60,6 +62,7 @@ export const defaultSettings = {
   aiRoutes: {
     metadata: 'gemini:gemini-3.8-flash' as const,
     hashtags: 'gemini:gemini-3.8-flash' as const,
+    thumbnailCopy: 'gemini:gemini-3.8-flash' as const,
     thumbnail: 'gemini:gemini-3.1-flash-image' as const,
     thumbnailResolution: '1K' as const,
   },
