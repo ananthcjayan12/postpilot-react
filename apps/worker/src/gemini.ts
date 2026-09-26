@@ -21,7 +21,7 @@ const socialInput = z.object({
   caption: z.string().max(5000).default(''),
   referenceMediaId: z.string().uuid().optional(),
   orientation: z.enum(['horizontal', 'vertical']).default('horizontal'),
-  thumbnailText: z.string().trim().min(1).max(60).optional(),
+  thumbnailText: z.string().trim().min(1).max(100).optional(),
   feedback: z.string().trim().max(500).optional(),
   referenceMode: z.enum(['preserve', 'style']).default('preserve'),
 });
@@ -74,7 +74,7 @@ async function generateThumbnailCopy(env: AppEnv['Bindings'], user: string, titl
   const route = routed((await routes(env, user)).thumbnailCopy);
   const key = await providerKey(env, user, route.provider);
   const language = await languageGuidance(env, user);
-  const prompt = `Write one expressive thumbnail hook that creates curiosity and makes the right viewer want to click. ${language} Use 2 to 6 punchy words, at most 42 characters total. Use an emotional, surprising, benefit-led, or curiosity-led angle grounded in the actual content. It must be truthful and instantly readable. Do not merely shorten or repeat the title. No hashtags, quotes, emoji, dishonest clickbait, or explanation. Return only the hook.${feedback ? `\nUser feedback for this version: ${feedback}` : ''}\nTitle: ${title}\nCaption: ${caption.slice(0, 1200)}`;
+  const prompt = `Act as an expert Instagram and YouTube thumbnail copywriter. Write one compelling thumbnail headline that does two jobs: clearly conveys the specific subject or outcome of the video, and creates an honest curiosity gap that makes the intended viewer want to watch. ${language} Use 6 to 12 strong words and at most 84 characters. It should fit naturally across no more than two visual lines. Prefer a concrete transformation, tension, discovery, mistake, result, or unanswered question from the actual video. It must remain truthful and understandable without reading the caption. Do not simply repeat the video title. Avoid vague phrases, generic hype, hashtags, quotes, emoji, dishonest clickbait, or explanations. Return only the final headline.${feedback ? `\nUser feedback for this version: ${feedback}` : ''}\nVideo title: ${title}\nVideo caption: ${caption.slice(0, 1200)}`;
   let text = '';
   if (route.provider === 'gemini') {
     const body = await googleJson(`https://generativelanguage.googleapis.com/v1beta/models/${route.model}:generateContent`, key, {
@@ -91,7 +91,7 @@ async function generateThumbnailCopy(env: AppEnv['Bindings'], user: string, titl
     if (!response.ok) throw new AppError(`OpenAI thumbnail writing failed (${response.status}).`, 502);
     text = body.output?.flatMap((o: any) => o.content || []).map((p: any) => p.text || '').join('') || '';
   }
-  const clean = Array.from(text.replace(/["'“”‘’#.!?,:;]+/g, '').replace(/\s+/g, ' ').trim().split(' ').slice(0, 6).join(' ')).slice(0, 42).join('').trim();
+  const clean = Array.from(text.replace(/["'“”‘’#]+/g, '').replace(/\s+/g, ' ').trim().split(' ').slice(0, 12).join(' ')).slice(0, 84).join('').trim();
   if (!clean) throw new AppError('The thumbnail-writing model returned no usable hook.', 502);
   return { text: clean, route };
 }
@@ -345,7 +345,7 @@ gemini.post('/thumbnail', async (c) => {
     ? { text: value.thumbnailText, route: routed((await routes(c.env, user)).thumbnailCopy) }
     : await generateThumbnailCopy(c.env, user, value.title, value.caption, value.feedback);
   const aspectRatio = value.orientation === 'vertical' ? '9:16' : '16:9';
-  const prompt = `Create a polished ${aspectRatio} social video thumbnail for: “${value.title}”. ${value.caption.slice(0, 800)}. Use one clear focal subject and an uncluttered high-contrast composition. Render exactly this single short headline, large and perfectly legible: “${copy.text}”. Do not add any other words, captions, logos, badges, or small text. Keep ample negative space and never make misleading claims.`;
+  const prompt = `Create a polished ${aspectRatio} social video thumbnail for: “${value.title}”. ${value.caption.slice(0, 800)}. Use one clear focal subject and an uncluttered high-contrast composition. Render exactly this headline, large and perfectly legible, split across no more than two balanced lines: “${copy.text}”. Give the headline strong hierarchy and enough safe margin for an Instagram or YouTube cover. Do not add any other words, captions, logos, badges, or small text. Keep ample negative space and never make misleading claims.`;
   let data = '', mime = 'image/png';
   if (route.provider === 'gemini') {
     const input: any[] = [];
