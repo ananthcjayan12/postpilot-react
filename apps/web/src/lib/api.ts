@@ -18,6 +18,10 @@ export type Settings = {
     thumbnail: 'gemini:gemini-3.1-flash-image' | 'gemini:gemini-2.5-flash-image' | 'openai:gpt-image-2.5-flare' | 'openai:gpt-image-2.5-sunburst';
     thumbnailResolution: '1K' | '2K' | '4K';
   };
+  contentLanguage: {
+    mode: 'english' | 'malayalam' | 'malayalam_english' | 'custom';
+    custom: string;
+  };
 };
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {

@@ -51,6 +51,12 @@ export const settingsInput = z.object({
     thumbnail: 'gemini:gemini-3.1-flash-image',
     thumbnailResolution: '1K',
   }),
+  contentLanguage: z.object({
+    mode: z.enum(['english', 'malayalam', 'malayalam_english', 'custom']),
+    custom: z.string().trim().max(120).default(''),
+  }).refine((value) => value.mode !== 'custom' || value.custom.length > 0, {
+    message: 'Enter a custom language or language mix.', path: ['custom'],
+  }).default({ mode: 'english', custom: '' }),
 });
 export const defaultSettings = {
   youtube: true,
@@ -66,6 +72,7 @@ export const defaultSettings = {
     thumbnail: 'gemini:gemini-3.1-flash-image' as const,
     thumbnailResolution: '1K' as const,
   },
+  contentLanguage: { mode: 'english' as const, custom: '' },
 };
 export const uploadInput = z.object({
   name: z.string().min(1).max(255),

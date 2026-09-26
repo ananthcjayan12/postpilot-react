@@ -368,7 +368,7 @@ api.get('/settings', async (c) => {
   const geminiConfigured = !!(await getCredential(c.env, c.get('user').id, 'gemini'));
   const openaiConfigured = !!(await getCredential(c.env, c.get('user').id, 'openai'));
   const saved = row ? JSON.parse(row.data) : {};
-  return c.json({ ...defaultSettings, ...saved, aiRoutes: { ...defaultSettings.aiRoutes, ...(saved.aiRoutes || {}) }, geminiConfigured, openaiConfigured });
+  return c.json({ ...defaultSettings, ...saved, aiRoutes: { ...defaultSettings.aiRoutes, ...(saved.aiRoutes || {}) }, contentLanguage: { ...defaultSettings.contentLanguage, ...(saved.contentLanguage || {}) }, geminiConfigured, openaiConfigured });
 });
 api.put('/settings', async (c) => {
   const value = settingsInput.parse(await c.req.json());

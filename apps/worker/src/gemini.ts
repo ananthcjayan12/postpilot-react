@@ -37,6 +37,18 @@ async function routes(env: AppEnv['Bindings'], user: string) {
   const saved = row ? JSON.parse(row.data) : {};
   return { ...defaultSettings.aiRoutes, ...(saved.aiRoutes || {}) };
 }
+async function languageGuidance(env: AppEnv['Bindings'], user: string) {
+  const row = await env.DB.prepare('SELECT data FROM settings WHERE user_id=?').bind(user).first<{ data: string }>();
+  const saved = row ? JSON.parse(row.data) : {};
+  const language = { ...defaultSettings.contentLanguage, ...(saved.contentLanguage || {}) };
+  if (language.mode === 'malayalam')
+    return 'Write in natural Malayalam using Malayalam script. Keep proper names in their conventional form.';
+  if (language.mode === 'malayalam_english')
+    return 'Write in a natural Malayalam and English mix used by fluent bilingual speakers. Use Malayalam script for Malayalam words and English script for English words; do not transliterate everything.';
+  if (language.mode === 'custom')
+    return `Write in this requested language or language mix: ${language.custom}. Follow that instruction naturally and consistently.`;
+  return 'Write in natural English.';
+}
 function routed(value: string) {
   const [provider, ...model] = value.split(':');
   return { provider: provider as 'gemini' | 'openai', model: model.join(':') };
@@ -58,7 +70,8 @@ function encodeBase64(bytes: Uint8Array) {
 async function generateThumbnailCopy(env: AppEnv['Bindings'], user: string, title: string, caption: string) {
   const route = routed((await routes(env, user)).thumbnailCopy);
   const key = await providerKey(env, user, route.provider);
-  const prompt = `Write one catchy thumbnail hook for this video. Use 2 to 5 simple words, at most 28 characters total. It must be truthful, specific, instantly readable, and different from the full title. No hashtags, quotes, punctuation, emoji, clickbait, or explanation. Return only the hook.\nTitle: ${title}\nCaption: ${caption.slice(0, 1200)}`;
+  const language = await languageGuidance(env, user);
+  const prompt = `Write one catchy thumbnail hook for this video. ${language} Use 2 to 5 simple words, at most 36 characters total. It must be truthful, specific, instantly readable, and different from the full title. No hashtags, quotes, punctuation, emoji, clickbait, or explanation. Return only the hook.\nTitle: ${title}\nCaption: ${caption.slice(0, 1200)}`;
   let text = '';
   if (route.provider === 'gemini') {
     const body = await googleJson(`https://generativelanguage.googleapis.com/v1beta/models/${route.model}:generateContent`, key, {
@@ -75,7 +88,7 @@ async function generateThumbnailCopy(env: AppEnv['Bindings'], user: string, titl
     if (!response.ok) throw new AppError(`OpenAI thumbnail writing failed (${response.status}).`, 502);
     text = body.output?.flatMap((o: any) => o.content || []).map((p: any) => p.text || '').join('') || '';
   }
-  const clean = text.replace(/["'“”‘’#.!?,:;]+/g, '').replace(/\s+/g, ' ').trim().split(' ').slice(0, 5).join(' ').slice(0, 28).trim();
+  const clean = Array.from(text.replace(/["'“”‘’#.!?,:;]+/g, '').replace(/\s+/g, ' ').trim().split(' ').slice(0, 5).join(' ')).slice(0, 36).join('').trim();
   if (!clean) throw new AppError('The thumbnail-writing model returned no usable hook.', 502);
   return { text: clean, route };
 }
@@ -239,6 +252,7 @@ gemini.post('/suggest', async (c) => {
       ? 'This is intended as a YouTube Short. Use a punchy title, front-load the hook, and keep it concise.'
       : 'This is intended as a standard YouTube video. Optimize for search intent without clickbait.';
     const metadataRoute = routed((await routes(c.env, user)).metadata);
+    const language = await languageGuidance(c.env, user);
     const generated = await googleJson(
       `https://generativelanguage.googleapis.com/v1beta/models/${metadataRoute.model}:generateContent`,
       apiKey,
@@ -248,7 +262,7 @@ gemini.post('/suggest', async (c) => {
         body: JSON.stringify({
           contents: [{ parts: [
             { fileData: { mimeType: current.mimeType || media.mime, fileUri: current.uri } },
-            { text: `Analyze the actual video content and suggest SEO-friendly YouTube metadata. ${formatGuidance} Return 5 distinct title suggestions (each at most 100 characters) and one useful description (at most 5000 characters). Do not invent facts, names, links, or claims not supported by the video.` },
+            { text: `Analyze the actual video content and suggest SEO-friendly YouTube metadata. ${formatGuidance} ${language} Return 5 distinct title suggestions (each at most 100 characters) and one useful description (at most 5000 characters). Do not invent facts, names, links, or claims not supported by the video.` },
           ] }],
           generationConfig: {
             responseMimeType: 'application/json',
@@ -288,7 +302,8 @@ gemini.post('/suggest', async (c) => {
 gemini.post('/hashtags', async (c) => {
   const value = socialInput.parse(await c.req.json()), user = c.get('user').id;
   const route = routed((await routes(c.env, user)).hashtags), key = await providerKey(c.env, user, route.provider);
-  const prompt = `Create 12 relevant Instagram hashtags for this video. Return only a single space-separated line of hashtags, each beginning with #. Avoid banned, misleading, or unrelated tags.\nTitle: ${value.title}\nCaption: ${value.caption}`;
+  const language = await languageGuidance(c.env, user);
+  const prompt = `Create 12 relevant Instagram hashtags for this video. ${language} Use hashtags appropriate to that audience, while retaining useful English discovery tags when relevant. Return only a single space-separated line of hashtags, each beginning with #. Avoid banned, misleading, or unrelated tags.\nTitle: ${value.title}\nCaption: ${value.caption}`;
   let text = '';
   if (route.provider === 'gemini') {
     const body = await googleJson(`https://generativelanguage.googleapis.com/v1beta/models/${route.model}:generateContent`, key, {

@@ -19,6 +19,7 @@ export function Settings() {
       thumbnail: 'gemini:gemini-3.1-flash-image',
       thumbnailResolution: '1K',
     },
+    contentLanguage: { mode: 'english' as const, custom: '' },
   });
   const [geminiApiKey, setGeminiApiKey] = useState('');
   const [removeKey, setRemoveKey] = useState(false);
@@ -68,6 +69,17 @@ export function Settings() {
             <label className="field"><span>Gemini API key {defaults.geminiConfigured ? '(configured)' : ''}</span><input className="input" type="password" autoComplete="new-password" disabled={loading || saving || removeKey} value={geminiApiKey} onChange={(event) => setGeminiApiKey(event.target.value)} placeholder={defaults.geminiConfigured ? 'Leave blank to keep the current key' : 'Enter your Gemini API key'} /></label>
             <a className="inline-link" href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer">Get a key from Google AI Studio ↗</a>
             {defaults.geminiConfigured && <Toggle label="Remove saved key when saving" checked={removeKey} onChange={setRemoveKey} />}
+          </div>
+        </section>
+        <section className="panel settings-card wide-card">
+          <div className="settings-icon purple"><Sparkles /></div>
+          <div className="settings-content">
+            <h2>Content language</h2>
+            <p>Controls the language used for AI-generated titles, captions, hashtags, and thumbnail writing. Manual text is never translated.</p>
+            <div className="language-settings">
+              <label className="field"><span>Language or mix</span><select className="input" value={defaults.contentLanguage.mode} onChange={(e) => setDefaults({ ...defaults, contentLanguage: { ...defaults.contentLanguage, mode: e.target.value as typeof defaults.contentLanguage.mode } })}><option value="english">English</option><option value="malayalam">Malayalam</option><option value="malayalam_english">Malayalam + English</option><option value="custom">Custom language or mix</option></select></label>
+              {defaults.contentLanguage.mode === 'custom' && <label className="field"><span>Custom language instruction</span><input className="input" maxLength={120} value={defaults.contentLanguage.custom} onChange={(e) => setDefaults({ ...defaults, contentLanguage: { ...defaults.contentLanguage, custom: e.target.value } })} placeholder="Example: Tamil + English, conversational" /><small>{defaults.contentLanguage.custom.length}/120</small></label>}
+            </div>
           </div>
         </section>
         <section className="panel settings-card wide-card">
