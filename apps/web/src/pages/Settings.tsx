@@ -1,3 +1,4 @@
+import { thumbnailPeopleOptions } from '@postpilot/shared';
 import { BellRing, Database, Save, Shield, Sparkles, TimerReset } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { api, type Settings as SettingsValue } from '../lib/api';
@@ -10,6 +11,7 @@ export function Settings() {
     notify: true,
     confirm: true,
     schedulerEnabled: true,
+    thumbnailPeople: 'auto',
     geminiConfigured: false,
     openaiConfigured: false,
     aiRoutes: {
@@ -80,6 +82,14 @@ export function Settings() {
               <label className="field"><span>Language or mix</span><select className="input" value={defaults.contentLanguage.mode} onChange={(e) => setDefaults({ ...defaults, contentLanguage: { ...defaults.contentLanguage, mode: e.target.value as typeof defaults.contentLanguage.mode } })}><option value="english">English</option><option value="malayalam">Malayalam</option><option value="malayalam_english">Malayalam + English</option><option value="custom">Custom language or mix</option></select></label>
               {defaults.contentLanguage.mode === 'custom' && <label className="field"><span>Custom language instruction</span><input className="input" maxLength={120} value={defaults.contentLanguage.custom} onChange={(e) => setDefaults({ ...defaults, contentLanguage: { ...defaults.contentLanguage, custom: e.target.value } })} placeholder="Example: Tamil + English, conversational" /><small>{defaults.contentLanguage.custom.length}/120</small></label>}
             </div>
+          </div>
+        </section>
+        <section className="panel settings-card wide-card">
+          <div className="settings-icon purple"><Sparkles /></div>
+          <div className="settings-content">
+            <h2>People in thumbnails</h2>
+            <p>Choose a preferred background for newly generated people. This applies when a person suits the video; preserving a reference person keeps their identity.</p>
+            <label className="field"><span>Generated people</span><select className="input" disabled={loading || saving} value={defaults.thumbnailPeople} onChange={(e) => setDefaults({ ...defaults, thumbnailPeople: e.target.value as SettingsValue['thumbnailPeople'] })}>{Object.entries(thumbnailPeopleOptions).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
           </div>
         </section>
         <section className="panel settings-card wide-card">

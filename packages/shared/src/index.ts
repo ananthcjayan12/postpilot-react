@@ -29,6 +29,11 @@ export const postInput = z.object({
   hashtags: z.string().max(1000).default(''),
   thumbnailMediaId: z.string().uuid().nullable().optional(),
 });
+export const thumbnailPeopleOptions = {
+  auto: 'Automatic', indian: 'Indian', western: 'Western', african: 'African', chinese: 'Chinese',
+  east_asian: 'East Asian', southeast_asian: 'Southeast Asian', middle_eastern: 'Middle Eastern', latino: 'Latino / Latina', diverse: 'Diverse mix', none: 'No people',
+} as const;
+export const thumbnailPeopleSchema = z.enum(['auto', 'indian', 'western', 'african', 'chinese', 'east_asian', 'southeast_asian', 'middle_eastern', 'latino', 'diverse', 'none']);
 export const settingsInput = z.object({
   youtube: z.boolean(),
   instagram: z.boolean(),
@@ -36,6 +41,7 @@ export const settingsInput = z.object({
   notify: z.boolean(),
   confirm: z.boolean(),
   schedulerEnabled: z.boolean().default(true),
+  thumbnailPeople: thumbnailPeopleSchema.default('auto'),
   geminiApiKey: z.string().trim().min(10).max(500).nullable().optional(),
   openaiApiKey: z.string().trim().min(10).max(500).nullable().optional(),
   aiRoutes: z.object({
@@ -65,6 +71,7 @@ export const defaultSettings = {
   notify: true,
   confirm: true,
   schedulerEnabled: true,
+  thumbnailPeople: 'auto' as const,
   aiRoutes: {
     metadata: 'gemini:gemini-3.8-flash' as const,
     hashtags: 'gemini:gemini-3.8-flash' as const,

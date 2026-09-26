@@ -144,6 +144,17 @@ describe('session and API boundaries', () => {
     expect(error.message).not.toContain('token=secret');
     expect(error.message).not.toContain('timed out');
   });
+  it('defaults legacy people preferences and persists validated thumbnail people settings', async () => {
+    const preferences = { youtube: true, instagram: false, facebook: false, notify: true, confirm: true };
+    await e.DB.prepare('INSERT INTO settings VALUES(?,?)').bind(user, JSON.stringify(preferences)).run();
+    expect((await (await call('/api/settings')).json() as any).thumbnailPeople).toBe('auto');
+    for (const thumbnailPeople of ['indian', 'western', 'african', 'chinese', 'diverse', 'none']) {
+      expect((await call('/api/settings', 'PUT', { ...preferences, thumbnailPeople })).status).toBe(200);
+      expect((await (await call('/api/settings')).json() as any).thumbnailPeople).toBe(thumbnailPeople);
+    }
+    expect((await call('/api/settings', 'PUT', { ...preferences, thumbnailPeople: 'invalid' })).status).toBe(400);
+    expect((await (await call('/api/settings')).json() as any).thumbnailPeople).toBe('none');
+  });
   it('encrypts the Gemini key, preserves it on ordinary saves, and removes it explicitly', async () => {
     const preferences = { youtube: true, instagram: false, facebook: false, notify: true, confirm: true, schedulerEnabled: true };
     const key = 'test-gemini-secret-key';

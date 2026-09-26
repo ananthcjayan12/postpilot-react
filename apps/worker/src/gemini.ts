@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import type { AppEnv, MediaRow } from './env';
 import { AppError, getCredential } from './lib';
-import { defaultSettings } from '@postpilot/shared';
+import { defaultSettings, thumbnailPeopleSchema, thumbnailPeopleOptions } from '@postpilot/shared';
 import { requireSession } from './auth';
 
 export const gemini = new Hono<AppEnv>();
@@ -23,6 +23,7 @@ const socialInput = z.object({
   orientation: z.enum(['horizontal', 'vertical']).default('horizontal'),
   thumbnailText: z.string().trim().min(1).max(100).optional(),
   feedback: z.string().trim().max(500).optional(),
+  preserveReferenceBranding: z.boolean().default(false),
   referenceMode: z.enum(['preserve', 'style']).default('style'),
 });
 function decodeBase64(value: string) {
@@ -348,7 +349,17 @@ gemini.post('/thumbnail', async (c) => {
   const designDirection = reference && value.referenceMode === 'style'
     ? 'Create fresh imagery for the requested video, keeping only the reference color palette, graphic design style, and visual theme.'
     : 'Use one clear focal subject and an uncluttered high-contrast composition with ample negative space.';
-  const prompt = `Create a polished ${aspectRatio} social video thumbnail for: “${value.title}”. ${value.caption.slice(0, 800)}. ${designDirection} Render exactly this headline, large and perfectly legible, split across no more than two balanced lines: “${copy.text}”. Give the headline strong hierarchy and enough safe margin for an Instagram or YouTube cover. Do not add any other words, captions, logos, badges, or small text. Never make misleading claims.`;
+  const settingsRow = await c.env.DB.prepare('SELECT data FROM settings WHERE user_id=?').bind(user).first<{ data: string }>();
+  const people = thumbnailPeopleSchema.catch('auto').parse(settingsRow ? JSON.parse(settingsRow.data).thumbnailPeople : 'auto');
+  const peopleDirection = reference && value.referenceMode === 'preserve'
+    ? 'Preserving the reference subject identity takes priority over any generated-people preference.'
+    : people === 'none' ? 'Do not include any people; use objects, scenery, or graphics to illustrate the video.'
+    : people === 'auto' ? ''
+    : `If people are appropriate for this video, create new fictional people with this preferred background: ${thumbnailPeopleOptions[people]}. Depict natural individual variation without stereotypes or caricatures. This preference does not require adding a person to an object-focused scene.`;
+  const brandingDirection = reference && value.preserveReferenceBranding
+    ? 'Preserve existing visible logos, company names, and brand names from the reference, keeping their spelling, colors, and recognizable design. These branding elements are the only exception to regenerating reference imagery and to the headline-only text rule. Do not invent branding, copy the old headline, slogans, or unrelated text. Integrate the branding legibly into the fresh composition.'
+    : 'Do not add any other words, captions, logos, company names, brand names, badges, or small text, including branding visible in the reference.';
+  const prompt = `Create a polished ${aspectRatio} social video thumbnail for: “${value.title}”. ${value.caption.slice(0, 800)}. ${designDirection} Render exactly this headline, large and perfectly legible, split across no more than two balanced lines: “${copy.text}”. Give the headline strong hierarchy and enough safe margin for an Instagram or YouTube cover. ${peopleDirection} ${brandingDirection} Never make misleading claims.`;
   const styleReferenceDirection = 'Use the supplied thumbnail only to understand its color palette, graphic design style, typography treatment, and visual theme. Generate all photographic or illustrated imagery from scratch based on the requested video title and caption. Create a new subject depiction, pose, camera angle, scene, and background, even when the video covers the same topic as the reference. Do not copy, trace, reuse, or closely reconstruct any reference person, face, product depiction, object arrangement, photograph, illustration, or background scene. Do not merely change the headline, recolor, crop, or lightly edit the reference. Keep the same aesthetic through colors, font style, contrast, and graphic effects, with a fresh composition suited to the new imagery and exact requested headline. The reference is a style guide, not a source image to preserve.';
   let data = '', mime = 'image/png';
   if (route.provider === 'gemini') {
