@@ -23,6 +23,8 @@ export function CreatePost() {
   const [thumbnail, setThumbnail] = useState<MediaAsset | null>(null);
   const [referenceImage, setReferenceImage] = useState<MediaAsset | null>(null);
   const [generatedThumbnailText, setGeneratedThumbnailText] = useState('');
+  const [thumbnailFeedback, setThumbnailFeedback] = useState('');
+  const [referenceMode, setReferenceMode] = useState<'preserve' | 'style'>('preserve');
   const [suggestions, setSuggestions] = useState<{ titles: string[]; description: string } | null>(null);
   const [videoMetadata, setVideoMetadata] = useState<VideoMetadata>();
   const [youtubeFormat, setYoutubeFormat] = useState<'video' | 'short'>('video');
@@ -97,7 +99,13 @@ export function CreatePost() {
   const generateThumbnail = async () => {
     if (!title.trim() || busy) return setError('Add a title before generating a thumbnail.');
     setBusy('Generating thumbnail…'); setError('');
-    try { const result = await api.generateThumbnail(title, caption, youtubeFormat === 'short' ? 'vertical' : 'horizontal', referenceImage?.id); setThumbnail(result); setGeneratedThumbnailText(result.thumbnailText); }
+    try { const result = await api.generateThumbnail(title, caption, youtubeFormat === 'short' ? 'vertical' : 'horizontal', referenceImage?.id, generatedThumbnailText || undefined, referenceMode); setThumbnail(result); setGeneratedThumbnailText(result.thumbnailText); }
+    catch (e: any) { setError(e.message); } finally { setBusy(''); }
+  };
+  const generateThumbnailCopy = async () => {
+    if (!title.trim() || busy) return setError('Add a title before generating thumbnail writing.');
+    setBusy(generatedThumbnailText ? 'Regenerating thumbnail hook…' : 'Writing thumbnail hook…'); setError('');
+    try { const result = await api.generateThumbnailCopy(title, caption, thumbnailFeedback.trim() || undefined); setGeneratedThumbnailText(result.thumbnailText); setThumbnailFeedback(''); }
     catch (e: any) { setError(e.message); } finally { setBusy(''); }
   };
   const chooseThumbnail = async (file?: File) => {
@@ -181,9 +189,10 @@ export function CreatePost() {
             {selected.includes('instagram') && <label className="field full"><span>Instagram hashtags</span><textarea className="textarea compact" value={hashtags} maxLength={1000} onChange={(e) => setHashtags(e.target.value)} placeholder="#reels #video #creator" /><small>{hashtags.length}/1000</small></label>}
           </div>
           {selected.includes('instagram') && <section className="social-assets">
-            <div className="social-ai-row"><button className="btn secondary" disabled={!!busy || !title.trim()} onClick={() => void generateHashtags()}><Sparkles size={16}/> Generate hashtags</button><button className="btn secondary" disabled={!!busy || !title.trim()} onClick={() => void generateThumbnail()}><Sparkles size={16}/> Generate thumbnail</button><a className="inline-link" href="/settings">Change AI models in Settings →</a></div>
-            <div className="reference-picker">{referenceImage && <img src={referenceImage.localUrl} alt="AI reference" />}<div><strong>Optional AI reference image</strong><p>Use a face, product, scene, color palette, or visual style as guidance.</p><label className="btn secondary small">Choose reference<input type="file" accept="image/*" hidden onChange={(e) => void chooseReference(e.target.files?.[0])}/></label>{referenceImage && <button className="btn ghost small" onClick={() => setReferenceImage(null)}>Remove</button>}</div></div>
-            <div className={`thumbnail-picker ${youtubeFormat === 'short' ? 'vertical' : ''}`}>{thumbnail && <img src={thumbnail.localUrl} alt="Selected thumbnail" />}<div><strong>{youtubeFormat === 'short' ? 'Vertical Short / Reel cover' : 'Horizontal video thumbnail'}</strong><p>{generatedThumbnailText ? `AI hook: “${generatedThumbnailText}”` : 'Upload your own image or generate one with AI.'}</p><label className="btn secondary small">Choose image<input type="file" accept="image/*" hidden onChange={(e) => void chooseThumbnail(e.target.files?.[0])}/></label>{thumbnail && <button className="btn ghost small" onClick={() => { setThumbnail(null); setGeneratedThumbnailText(''); }}>Remove</button>}</div></div>
+            <div className="social-ai-row"><button className="btn secondary" disabled={!!busy || !title.trim()} onClick={() => void generateHashtags()}><Sparkles size={16}/> Generate hashtags</button><a className="inline-link" href="/settings">Change AI models in Settings →</a></div>
+            <div className="thumbnail-copy-editor"><label className="field"><span>Thumbnail hook</span><input className="input" maxLength={60} value={generatedThumbnailText} onChange={(e) => setGeneratedThumbnailText(e.target.value)} placeholder="Generate or write a short, expressive hook" /></label><label className="field"><span>Optional regeneration feedback</span><input className="input" maxLength={500} value={thumbnailFeedback} onChange={(e) => setThumbnailFeedback(e.target.value)} placeholder="Example: Make it more emotional and less generic" /></label><button className="btn secondary" disabled={!!busy || !title.trim()} onClick={() => void generateThumbnailCopy()}><Sparkles size={16}/>{generatedThumbnailText ? 'Regenerate hook' : 'Generate hook'}</button><button className="btn primary" disabled={!!busy || !title.trim() || !generatedThumbnailText.trim()} onClick={() => void generateThumbnail()}><Sparkles size={16}/> Generate thumbnail</button></div>
+            <div className="reference-picker">{referenceImage && <img src={referenceImage.localUrl} alt="AI reference" />}<div><strong>Optional AI reference image</strong><p>Choose whether to preserve its subject/product or transfer only its visual style.</p><label className="btn secondary small">Choose reference<input type="file" accept="image/*" hidden onChange={(e) => void chooseReference(e.target.files?.[0])}/></label>{referenceImage && <button className="btn ghost small" onClick={() => setReferenceImage(null)}>Remove</button>}</div>{referenceImage && <label className="field reference-mode"><span>Reference use</span><select className="input" value={referenceMode} onChange={(e) => setReferenceMode(e.target.value as 'preserve' | 'style')}><option value="preserve">Preserve person / product</option><option value="style">Use colors / visual style</option></select></label>}</div>
+            <div className={`thumbnail-picker ${youtubeFormat === 'short' ? 'vertical' : ''}`}>{thumbnail && <img src={thumbnail.localUrl} alt="Selected thumbnail" />}<div><strong>{youtubeFormat === 'short' ? 'Vertical Short / Reel cover' : 'Horizontal video thumbnail'}</strong><p>{generatedThumbnailText ? `Hook: “${generatedThumbnailText}”` : 'Review a hook above, then generate the thumbnail.'}</p><label className="btn secondary small">Choose image<input type="file" accept="image/*" hidden onChange={(e) => void chooseThumbnail(e.target.files?.[0])}/></label>{thumbnail && <button className="btn ghost small" onClick={() => setThumbnail(null)}>Remove image</button>}</div></div>
           </section>}
           <div className="ai-hint"><Sparkles size={17} /><span><strong>Tip:</strong> Keep the first 125 characters strong; Instagram truncates long captions in-feed.</span></div>
         </section>

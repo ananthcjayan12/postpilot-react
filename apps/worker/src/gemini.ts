@@ -21,6 +21,9 @@ const socialInput = z.object({
   caption: z.string().max(5000).default(''),
   referenceMediaId: z.string().uuid().optional(),
   orientation: z.enum(['horizontal', 'vertical']).default('horizontal'),
+  thumbnailText: z.string().trim().min(1).max(60).optional(),
+  feedback: z.string().trim().max(500).optional(),
+  referenceMode: z.enum(['preserve', 'style']).default('preserve'),
 });
 function decodeBase64(value: string) {
   const binary = atob(value), bytes = new Uint8Array(binary.length);
@@ -67,11 +70,11 @@ function encodeBase64(bytes: Uint8Array) {
   for (let i = 0; i < bytes.length; i += 0x8000) value += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
   return btoa(value);
 }
-async function generateThumbnailCopy(env: AppEnv['Bindings'], user: string, title: string, caption: string) {
+async function generateThumbnailCopy(env: AppEnv['Bindings'], user: string, title: string, caption: string, feedback?: string) {
   const route = routed((await routes(env, user)).thumbnailCopy);
   const key = await providerKey(env, user, route.provider);
   const language = await languageGuidance(env, user);
-  const prompt = `Write one catchy thumbnail hook for this video. ${language} Use 2 to 5 simple words, at most 36 characters total. It must be truthful, specific, instantly readable, and different from the full title. No hashtags, quotes, punctuation, emoji, clickbait, or explanation. Return only the hook.\nTitle: ${title}\nCaption: ${caption.slice(0, 1200)}`;
+  const prompt = `Write one expressive thumbnail hook that creates curiosity and makes the right viewer want to click. ${language} Use 2 to 6 punchy words, at most 42 characters total. Use an emotional, surprising, benefit-led, or curiosity-led angle grounded in the actual content. It must be truthful and instantly readable. Do not merely shorten or repeat the title. No hashtags, quotes, emoji, dishonest clickbait, or explanation. Return only the hook.${feedback ? `\nUser feedback for this version: ${feedback}` : ''}\nTitle: ${title}\nCaption: ${caption.slice(0, 1200)}`;
   let text = '';
   if (route.provider === 'gemini') {
     const body = await googleJson(`https://generativelanguage.googleapis.com/v1beta/models/${route.model}:generateContent`, key, {
@@ -88,7 +91,7 @@ async function generateThumbnailCopy(env: AppEnv['Bindings'], user: string, titl
     if (!response.ok) throw new AppError(`OpenAI thumbnail writing failed (${response.status}).`, 502);
     text = body.output?.flatMap((o: any) => o.content || []).map((p: any) => p.text || '').join('') || '';
   }
-  const clean = Array.from(text.replace(/["'“”‘’#.!?,:;]+/g, '').replace(/\s+/g, ' ').trim().split(' ').slice(0, 5).join(' ')).slice(0, 36).join('').trim();
+  const clean = Array.from(text.replace(/["'“”‘’#.!?,:;]+/g, '').replace(/\s+/g, ' ').trim().split(' ').slice(0, 6).join(' ')).slice(0, 42).join('').trim();
   if (!clean) throw new AppError('The thumbnail-writing model returned no usable hook.', 502);
   return { text: clean, route };
 }
@@ -325,6 +328,12 @@ gemini.post('/hashtags', async (c) => {
   return c.json({ hashtags, ...route });
 });
 
+gemini.post('/thumbnail-copy', async (c) => {
+  const value = socialInput.parse(await c.req.json()), user = c.get('user').id;
+  const copy = await generateThumbnailCopy(c.env, user, value.title, value.caption, value.feedback);
+  return c.json({ thumbnailText: copy.text, provider: copy.route.provider, model: copy.route.model });
+});
+
 gemini.post('/thumbnail', async (c) => {
   const value = socialInput.parse(await c.req.json()), user = c.get('user').id;
   const route = routed((await routes(c.env, user)).thumbnail), key = await providerKey(c.env, user, route.provider);
@@ -332,14 +341,19 @@ gemini.post('/thumbnail', async (c) => {
   if (route.model === 'gemini-2.5-flash-image' && resolution !== '1K')
     throw new AppError('Gemini 2.5 Flash Image supports only the default 1K output.');
   const reference = await referenceImage(c.env, user, value.referenceMediaId);
-  const copy = await generateThumbnailCopy(c.env, user, value.title, value.caption);
+  const copy = value.thumbnailText
+    ? { text: value.thumbnailText, route: routed((await routes(c.env, user)).thumbnailCopy) }
+    : await generateThumbnailCopy(c.env, user, value.title, value.caption, value.feedback);
   const aspectRatio = value.orientation === 'vertical' ? '9:16' : '16:9';
   const prompt = `Create a polished ${aspectRatio} social video thumbnail for: “${value.title}”. ${value.caption.slice(0, 800)}. Use one clear focal subject and an uncluttered high-contrast composition. Render exactly this single short headline, large and perfectly legible: “${copy.text}”. Do not add any other words, captions, logos, badges, or small text. Keep ample negative space and never make misleading claims.`;
   let data = '', mime = 'image/png';
   if (route.provider === 'gemini') {
     const input: any[] = [];
     if (reference) input.push({ type: 'image', mime_type: reference.media.mime, data: encodeBase64(reference.bytes) });
-    input.push({ type: 'text', text: reference ? `${prompt} Use the supplied image as a visual reference for subject, composition, colors, or style while creating a new thumbnail.` : prompt });
+    const referenceDirection = value.referenceMode === 'style'
+      ? 'Use the supplied image as the primary style reference. Closely match its palette, lighting, texture, visual medium, mood, and composition language while applying them to the requested thumbnail subject.'
+      : 'The supplied image is the primary source reference. Preserve the recognizable subject or product identity, facial features, proportions, distinctive objects, clothing, colors, and visual character. Recompose it only as needed for the thumbnail canvas and headline. Do not replace it with a different person, product, or generic substitute.';
+    input.push({ type: 'text', text: reference ? `${prompt} ${referenceDirection}` : prompt });
     const body = await googleJson('https://generativelanguage.googleapis.com/v1beta/interactions', key, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ model: route.model, input, response_format: { type: 'image', aspect_ratio: aspectRatio, ...(route.model === 'gemini-2.5-flash-image' ? {} : { image_size: resolution }) } }),
@@ -353,9 +367,12 @@ gemini.post('/thumbnail', async (c) => {
       : { '1K': '1376x768', '2K': '2048x1152', '4K': '3840x2160' }[resolution];
     if (reference) {
       const form = new FormData();
-      form.set('model', route.model); form.set('prompt', `${prompt} Use the supplied image as a visual reference.`);
+      const referenceDirection = value.referenceMode === 'style'
+        ? 'Use the supplied image as the primary style reference. Closely reproduce its palette, lighting, texture, visual medium, mood, and composition language while applying them to the requested thumbnail.'
+        : 'Treat the supplied image as the primary source image, not loose inspiration. Preserve the recognizable identity and facial structure of any person, or the exact defining shape, markings, colors, and details of any product or object. Keep its visual character intact while changing only composition, crop, background, lighting, and headline placement as needed for the thumbnail.';
+      form.set('model', route.model); form.set('prompt', `${prompt} ${referenceDirection}`);
       form.set('image[]', new Blob([reference.bytes], { type: reference.media.mime }), reference.media.name);
-      form.set('size', openaiSize); form.set('quality', 'low'); form.set('output_format', 'png');
+      form.set('size', openaiSize); form.set('quality', 'high'); form.set('output_format', 'png');
       response = await fetch('https://api.openai.com/v1/images/edits', { method: 'POST', headers: { Authorization: `Bearer ${key}` }, body: form, signal: AbortSignal.timeout(120_000) });
     } else response = await fetch('https://api.openai.com/v1/images/generations', {
       method: 'POST', headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
