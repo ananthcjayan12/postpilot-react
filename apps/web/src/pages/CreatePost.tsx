@@ -151,7 +151,7 @@ export function CreatePost() {
   };
 
   return (
-    <>
+    <div className="project-editor">
       <div className="page-heading"><div><span className="eyebrow">{postId ? 'RESUME' : 'CREATE'}</span><h1>{postId ? 'Edit Project' : asset ? 'Create from Library' : 'Upload Video'}</h1><p>{postId ? 'Continue editing this saved project.' : 'Create once, then publish the same media across your connected channels.'}</p></div><button className="btn secondary" onClick={() => void submit('draft')} disabled={!!busy || loadingProject}><Save size={17} /> {postId ? 'Save Changes' : 'Save Draft'}</button></div>
       {error && <div className="alert danger">{error}</div>}
       {metaSelected && accounts && !accounts.readiness.publicMediaUrlConfigured && <div className="alert warning"><strong>Meta needs a public media URL.</strong> Use the deployed HTTPS studio to publish to Instagram or Facebook.</div>}
@@ -193,14 +193,53 @@ export function CreatePost() {
             <label className="field full"><span>Caption / description</span><textarea className="textarea" value={caption} maxLength={5000} onChange={(e) => setCaption(e.target.value)} placeholder="Tell your audience what this video is about…" /><small>{caption.length}/5000</small></label>
             {selected.includes('instagram') && <label className="field full"><span>Instagram hashtags</span><textarea className="textarea compact" value={hashtags} maxLength={1000} onChange={(e) => setHashtags(e.target.value)} placeholder="#reels #video #creator" /><small>{hashtags.length}/1000</small></label>}
           </div>
-          {selected.includes('instagram') && <section className="social-assets">
-            <div className="social-ai-row"><button className="btn secondary" disabled={!!busy || !title.trim()} onClick={() => void generateHashtags()}><Sparkles size={16}/> Generate hashtags</button><a className="inline-link" href="/settings">Change AI models in Settings →</a></div>
-            <div className="thumbnail-copy-editor"><div className="thumbnail-headline-column"><label className="field"><span>Thumbnail headline</span><textarea className="textarea thumbnail-headline-input" maxLength={100} value={generatedThumbnailText} onChange={(e) => setGeneratedThumbnailText(e.target.value)} placeholder="Generate or write a clear, curiosity-driven thumbnail headline" /><small>{generatedThumbnailText.length}/100 · Best at 6–12 words and two lines</small></label>{generatedThumbnailText && <div className={`headline-preview ${youtubeFormat === 'short' ? 'vertical' : ''}`}><span>HEADLINE PREVIEW</span><strong>{generatedThumbnailText}</strong></div>}</div><label className="field"><span>Optional headline feedback</span><textarea className="textarea thumbnail-feedback-input" maxLength={500} value={thumbnailFeedback} onChange={(e) => setThumbnailFeedback(e.target.value)} placeholder="Example: Mention the Kerala location and make the result more surprising" /><small>{thumbnailFeedback.length}/500</small></label><label className="field"><span>Optional image ideas</span><textarea className="textarea compact" maxLength={1000} disabled={!!busy} value={thumbnailIdeas} onChange={(e) => setThumbnailIdeas(e.target.value)} placeholder="Example: A person holding the product, warm lighting, and a bold yellow background" /><small>Describe the scene, props, lighting, or composition. Saved with your draft.</small></label><div className="thumbnail-copy-actions"><button className="btn secondary" disabled={!!busy || !title.trim()} onClick={() => void generateThumbnailCopy()}><Sparkles size={16}/>{generatedThumbnailText ? 'Regenerate headline' : 'Generate headline'}</button><button className="btn primary" disabled={!!busy || !title.trim() || !generatedThumbnailText.trim()} onClick={() => void generateThumbnail()}><Sparkles size={16}/> Generate thumbnail</button></div></div>
-            {thumbnail && <div className="thumbnail-copy-editor"><label className="field"><span>Optional image regeneration comments</span><textarea className="textarea compact" maxLength={1000} disabled={!!busy} value={imageFeedback} onChange={(e) => setImageFeedback(e.target.value)} placeholder="Example: Use a closer view, brighter lighting, and more space around the headline" /><small>Creates a new image using your headline, image ideas, reference, and these comments.</small></label><div className="thumbnail-copy-actions"><button className="btn secondary" disabled={!!busy || !title.trim() || !generatedThumbnailText.trim()} onClick={() => void generateThumbnail(true)}><Sparkles size={16}/> Regenerate thumbnail</button></div></div>}
-            <div className="reference-picker">{referenceImage && <img src={referenceImage.localUrl} alt="AI reference" />}<div><strong>Optional AI reference image</strong><p>Generate fresh imagery while keeping the reference’s colors, design style, and visual theme.</p><label className="btn secondary small">Choose reference<input type="file" accept="image/*" hidden onChange={(e) => void chooseReference(e.target.files?.[0])}/></label>{referenceImage && <button className="btn ghost small" onClick={() => setReferenceImage(null)}>Remove</button>}</div>{referenceImage && <label className="field reference-mode"><span>Reference use</span><select className="input" value={referenceMode} onChange={(e) => setReferenceMode(e.target.value as 'preserve' | 'style')}><option value="style">Keep style & colors, regenerate imagery</option><option value="preserve">Preserve person / product</option></select><small>{referenceMode === 'style' ? 'Creates new subjects and scenes; keeps only colors, design style, and visual theme.' : 'Keeps subject identity while allowing a new design.'}</small></label>}</div>
-            {referenceImage && <label><input type="checkbox" checked={preserveReferenceBranding} onChange={(e) => setPreserveReferenceBranding(e.target.checked)} /> Preserve logos and company / brand names from the reference</label>}
-            <div className={`thumbnail-picker ${youtubeFormat === 'short' ? 'vertical' : ''}`}>{thumbnail && <img src={thumbnail.localUrl} alt="Selected thumbnail" />}<div><strong>{youtubeFormat === 'short' ? 'Vertical Short / Reel cover' : 'Horizontal video thumbnail'}</strong><p>{generatedThumbnailText ? `Hook: “${generatedThumbnailText}”` : 'Review a hook above, then generate the thumbnail.'}</p><label className="btn secondary small">Choose image<input type="file" accept="image/*" hidden onChange={(e) => void chooseThumbnail(e.target.files?.[0])}/></label>{thumbnail && <button className="btn ghost small" onClick={() => setThumbnail(null)}>Remove image</button>}</div></div>
-          </section>}
+          {selected.includes('instagram') && <div className="social-ai-row">
+            <button className="btn secondary" disabled={!!busy || !title.trim()} onClick={() => void generateHashtags()}><Sparkles size={16}/> Generate hashtags</button>
+          </div>}
+          <section className="social-assets" aria-labelledby="thumbnail-section-title">
+            <div className="thumbnail-section-heading">
+              <div><h2 id="thumbnail-section-title">Thumbnail studio</h2><p>Write your headline, set the visual direction, then generate your cover.</p></div>
+              <a className="inline-link" href="/settings">AI settings →</a>
+            </div>
+            <div className="thumbnail-copy-editor">
+              <div className="thumbnail-headline-column">
+                <label className="field"><span>Thumbnail headline</span><textarea className="textarea thumbnail-headline-input" maxLength={100} disabled={!!busy} value={generatedThumbnailText} onChange={(e) => setGeneratedThumbnailText(e.target.value)} placeholder="Generate or write a clear, curiosity-driven thumbnail headline" /><small>{generatedThumbnailText.length}/100 · Best at 6–12 words and two lines</small></label>
+                {generatedThumbnailText && <div className={`headline-preview ${youtubeFormat === 'short' ? 'vertical' : ''}`}><span>HEADLINE PREVIEW</span><strong>{generatedThumbnailText}</strong></div>}
+              </div>
+              <div className="thumbnail-feedback-column">
+                <label className="field"><span>Optional headline feedback</span><textarea className="textarea thumbnail-feedback-input" maxLength={500} disabled={!!busy} value={thumbnailFeedback} onChange={(e) => setThumbnailFeedback(e.target.value)} placeholder="Example: Mention the Kerala location and make the result more surprising" /><small>{thumbnailFeedback.length}/500</small></label>
+                <button className="btn secondary" disabled={!!busy || !title.trim()} onClick={() => void generateThumbnailCopy()}><Sparkles size={16}/>{generatedThumbnailText ? 'Regenerate headline' : 'Generate headline'}</button>
+              </div>
+            </div>
+            <div className="thumbnail-direction">
+              <label className="field"><span>Optional image ideas</span><textarea className="textarea compact" maxLength={1000} disabled={!!busy} value={thumbnailIdeas} onChange={(e) => setThumbnailIdeas(e.target.value)} placeholder="Example: A person holding the product, warm lighting, and a bold yellow background" /><small>Describe the scene, props, lighting, or composition. Saved with your draft.</small></label>
+              <div className="reference-picker">
+                <div className="reference-summary">
+                  {referenceImage && <img src={referenceImage.localUrl} alt="AI reference" />}
+                  <div><strong>Optional reference image</strong><p>Keep its colors, design style, and visual theme while creating fresh imagery.</p></div>
+                </div>
+                <div className="asset-actions">
+                  <label className="btn secondary small">Choose reference<input type="file" accept="image/*" hidden disabled={!!busy} onChange={(e) => void chooseReference(e.target.files?.[0])}/></label>
+                  {referenceImage && <button className="btn secondary small" disabled={!!busy} onClick={() => setReferenceImage(null)}>Remove reference</button>}
+                </div>
+                {referenceImage && <>
+                  <label className="field reference-mode"><span>Reference use</span><select className="input" disabled={!!busy} value={referenceMode} onChange={(e) => setReferenceMode(e.target.value as 'preserve' | 'style')}><option value="style">Style & colors only</option><option value="preserve">Keep person / product</option></select><small>{referenceMode === 'style' ? 'Creates new subjects and scenes; keeps only colors, design style, and visual theme.' : 'Keeps subject identity while allowing a new design.'}</small></label>
+                  <label className="branding-option"><input type="checkbox" disabled={!!busy} checked={preserveReferenceBranding} onChange={(e) => setPreserveReferenceBranding(e.target.checked)} /><span>Preserve logos and company / brand names from the reference</span></label>
+                </>}
+              </div>
+              <div className="thumbnail-copy-actions"><button className="btn primary" disabled={!!busy || !title.trim() || !generatedThumbnailText.trim()} onClick={() => void generateThumbnail()}><Sparkles size={16}/> Generate thumbnail</button></div>
+            </div>
+            <div className={`thumbnail-picker ${youtubeFormat === 'short' ? 'vertical' : ''}`}>
+              {thumbnail && <img src={thumbnail.localUrl} alt="Selected thumbnail" />}
+              <div className="thumbnail-result-copy"><strong>{youtubeFormat === 'short' ? 'Vertical Short / Reel cover' : 'Horizontal video thumbnail'}</strong><p>{generatedThumbnailText ? `Hook: “${generatedThumbnailText}”` : 'Review a headline above, then generate or upload your cover.'}</p>
+                <div className="asset-actions"><label className="btn secondary small">{thumbnail ? 'Replace image' : 'Choose image'}<input type="file" accept="image/*" hidden disabled={!!busy} onChange={(e) => void chooseThumbnail(e.target.files?.[0])}/></label>{thumbnail && <button className="btn secondary small" disabled={!!busy} onClick={() => setThumbnail(null)}>Remove image</button>}</div>
+              </div>
+            </div>
+            {thumbnail && <div className="thumbnail-regeneration">
+              <label className="field"><span>Optional image regeneration comments</span><textarea className="textarea compact" maxLength={1000} disabled={!!busy} value={imageFeedback} onChange={(e) => setImageFeedback(e.target.value)} placeholder="Example: Use a closer view, brighter lighting, and more space around the headline" /><small>Creates a new image using your headline, image ideas, reference, and these comments.</small></label>
+              <div className="thumbnail-copy-actions"><button className="btn secondary" disabled={!!busy || !title.trim() || !generatedThumbnailText.trim()} onClick={() => void generateThumbnail(true)}><Sparkles size={16}/> Regenerate thumbnail</button></div>
+            </div>}
+          </section>
           <div className="ai-hint"><Sparkles size={17} /><span><strong>Tip:</strong> Keep the first 125 characters strong; Instagram truncates long captions in-feed.</span></div>
         </section>
 
@@ -228,6 +267,6 @@ export function CreatePost() {
           <div className="preview-mini"><div className={`preview-screen${asset?.mimeType.startsWith('video/') ? ' video-preview-screen' : ''}`}>{asset ? (asset.mimeType.startsWith('video/') ? <><video src={localPreview || asset.localUrl} muted playsInline preload="metadata" /><span className="play-chip"><Play fill="currentColor" size={13} /></span></> : <img src={localPreview || asset.localUrl} alt="" />) : <div className="preview-placeholder">Preview</div>}</div><strong>{title || 'Your post title'}</strong><span>{caption || 'Your caption will appear here.'}</span></div>
         </aside>
       </div>
-    </>
+    </div>
   );
 }
