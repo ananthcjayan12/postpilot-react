@@ -182,6 +182,7 @@ export const api = {
     title: string;
     caption: string;
     mediaId: string;
+    carouselMediaIds?: string[];
     platforms: Platform[];
     action: 'draft' | 'schedule' | 'publish';
     scheduledFor?: string;
@@ -201,6 +202,7 @@ export const api = {
     title: string;
     caption: string;
     mediaId: string;
+    carouselMediaIds?: string[];
     platforms: Platform[];
     action: 'draft' | 'schedule';
     scheduledFor?: string;

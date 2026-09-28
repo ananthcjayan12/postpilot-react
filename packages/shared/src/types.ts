@@ -23,6 +23,7 @@ export interface PostRecord {
   title: string;
   caption: string;
   mediaId: string;
+  carouselMediaIds: string[];
   platforms: Platform[];
   status: PostStatus;
   scheduledFor?: string;

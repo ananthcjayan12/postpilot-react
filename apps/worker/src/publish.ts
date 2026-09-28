@@ -110,6 +110,29 @@ export async function youtubeChunk(env: Env, post: PostRow, media: MediaRow) {
   if (!media.mime.startsWith('video/')) throw new NonRetryableError('YouTube requires a video.');
   const token = await googleToken(env, post.user_id);
   const headers = { Authorization: `Bearer ${token}` };
+  const finish = async (id: string) => {
+    if (!post.thumbnail_media_id) {
+      await save(env, post.id, 'youtube', 'success', { youtubeFormat: t.value.youtubeFormat || 'video', id, url: t.value.youtubeFormat === 'short' ? `https://www.youtube.com/shorts/${id}` : `https://www.youtube.com/watch?v=${id}` });
+      return true;
+    }
+    if (!t.value.id) {
+      t.value = { youtubeFormat: t.value.youtubeFormat || 'video', id };
+      await save(env, post.id, 'youtube', 'processing', t.value);
+    }
+    const thumbnail = await env.DB.prepare('SELECT * FROM media WHERE id=? AND user_id=?').bind(post.thumbnail_media_id, post.user_id).first<MediaRow>();
+    if (!thumbnail || !['image/jpeg', 'image/png'].includes(thumbnail.mime) || thumbnail.size > 50 * 1024 ** 2)
+      throw new NonRetryableError('YouTube thumbnails must be JPG or PNG and at most 50 MB.');
+    const object = await env.MEDIA.get(thumbnail.object_key);
+    if (!object) throw new NonRetryableError('Thumbnail image is missing.');
+    await checked(await fetch(`https://www.googleapis.com/upload/youtube/v3/thumbnails/set?${new URLSearchParams({ videoId: id, uploadType: 'media' })}`, {
+      method: 'POST',
+      headers: { ...headers, 'Content-Type': thumbnail.mime, 'Content-Length': String(thumbnail.size) },
+      body: await object.arrayBuffer(),
+    }));
+    await save(env, post.id, 'youtube', 'success', { youtubeFormat: t.value.youtubeFormat || 'video', id, url: t.value.youtubeFormat === 'short' ? `https://www.youtube.com/shorts/${id}` : `https://www.youtube.com/watch?v=${id}` });
+    return true;
+  };
+  if (t.value.id) return finish(t.value.id);
   let session: string;
   if (t.value.session) {
     session = await unseal<string>(env, t.value.session, `${post.id}:youtube-session`);
@@ -155,12 +178,7 @@ export async function youtubeChunk(env: Env, post: PostRow, media: MediaRow) {
   if (probe.status === 200 || probe.status === 201) {
     const result: any = await probe.json();
     if (!result.id) throw new ReviewError('Upload completed without a retrievable video ID.');
-    await save(env, post.id, 'youtube', 'success', {
-      youtubeFormat: t.value.youtubeFormat || 'video',
-      id: result.id,
-      url: t.value.youtubeFormat === 'short' ? `https://www.youtube.com/shorts/${result.id}` : `https://www.youtube.com/watch?v=${result.id}`,
-    });
-    return true;
+    return finish(result.id);
   }
   if ([404, 410].includes(probe.status))
     throw new ReviewError('YouTube upload session expired. Verify the channel before retrying.');
@@ -188,18 +206,36 @@ export async function youtubeChunk(env: Env, post: PostRow, media: MediaRow) {
   }
   const result = await checked(response);
   if (!result.id) throw new ReviewError('YouTube result is missing an ID.');
-  await save(env, post.id, 'youtube', 'success', {
-    youtubeFormat: t.value.youtubeFormat || 'video',
-    id: result.id,
-    url: t.value.youtubeFormat === 'short' ? `https://www.youtube.com/shorts/${result.id}` : `https://www.youtube.com/watch?v=${result.id}`,
-  });
-  return true;
+  return finish(result.id);
 }
-async function createInstagram(env: Env, post: PostRow, media: MediaRow) {
+export async function createInstagram(env: Env, post: PostRow, media: MediaRow) {
   const t = await target(env, post.id, 'instagram');
   if (t.value.container || t.status === 'success') return;
   const grant = await instagramGrant(env, post.user_id);
   if (!grant.userId) throw new NonRetryableError('Instagram connection is missing an account ID.');
+  const carouselIds: string[] = JSON.parse(post.carousel_media_ids || '[]');
+  if (carouselIds.length) {
+    const ids = [media.id, ...carouselIds];
+    const children: string[] = t.value.children || [];
+    for (let index = children.length; index < ids.length; index++) {
+      const result = await checked(await fetch(instagramGraph(env, `${grant.userId}/media`), {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${grant.accessToken}` },
+        body: new URLSearchParams({ image_url: await delivery(env, ids[index]), is_carousel_item: 'true' }),
+      }));
+      if (!result.id) throw new NonRetryableError('Instagram returned no carousel item ID.');
+      children.push(result.id);
+      await save(env, post.id, 'instagram', 'processing', { children });
+    }
+    const result = await checked(await fetch(instagramGraph(env, `${grant.userId}/media`), {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${grant.accessToken}` },
+      body: new URLSearchParams({ media_type: 'CAROUSEL', children: children.join(','), caption: `${post.caption}${post.hashtags ? `\n\n${post.hashtags}` : ''}`.slice(0, 2200) }),
+    }));
+    if (!result.id) throw new NonRetryableError('Instagram returned no carousel container ID.');
+    await save(env, post.id, 'instagram', 'processing', { children, container: result.id });
+    return;
+  }
   // Container creation itself does not publish. An orphan can expire safely.
   const body = new URLSearchParams({
     caption: `${post.caption}${post.hashtags ? `\n\n${post.hashtags}` : ''}`.slice(0, 2200),

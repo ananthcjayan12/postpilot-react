@@ -195,6 +195,8 @@ media.delete('/:id', async (c) => {
   const id = c.req.param('id'), user = c.get('user').id;
   const row = await c.env.DB.prepare('SELECT * FROM media WHERE id=? AND user_id=?').bind(id, user).first<MediaRow>();
   if (!row) throw new AppError('Media not found.', 404);
+  const carouselUse = await c.env.DB.prepare("SELECT id FROM posts WHERE user_id=? AND EXISTS (SELECT 1 FROM json_each(posts.carousel_media_ids) WHERE value=?) LIMIT 1").bind(user, id).first();
+  if (carouselUse) throw new AppError('Remove this image from its carousel draft before deleting it.', 409);
   await c.env.MEDIA.delete(row.object_key);
   await c.env.DB.batch([
     c.env.DB.prepare('DELETE FROM attempts WHERE run_id IN (SELECT r.id FROM runs r JOIN posts p ON p.id=r.post_id WHERE p.media_id=? AND p.user_id=?)').bind(id, user),

@@ -18,6 +18,7 @@ export const postInput = z.object({
   title: z.string().trim().min(1).max(100),
   caption: z.string().max(5000).default(''),
   mediaId: z.string().uuid(),
+  carouselMediaIds: z.array(z.string().uuid()).max(9).default([]),
   platforms: z
     .array(platformSchema)
     .min(1)

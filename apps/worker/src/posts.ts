@@ -6,6 +6,27 @@ import { AppError, getCredential, now, saveCredential } from './lib';
 import { requireSession } from './auth';
 export const api = new Hono<AppEnv>();
 api.use('*', requireSession);
+async function validatePostMedia(env: Env, user: string, v: { mediaId: string; carouselMediaIds: string[]; platforms: string[]; youtubeFormat: string; videoMetadata?: Parameters<typeof shortsEligibility>[0] }) {
+  const ids = [v.mediaId, ...v.carouselMediaIds];
+  if (new Set(ids).size !== ids.length) throw new AppError('Choose each carousel image only once.');
+  const rows = (await env.DB.prepare(`SELECT id,mime FROM media WHERE user_id=? AND id IN (${ids.map(() => '?').join(',')})`).bind(user, ...ids).all<{ id: string; mime: string }>()).results;
+  if (rows.length !== ids.length) throw new AppError('Select uploaded media you own.');
+  const media = rows.find((row) => row.id === v.mediaId)!;
+  if (v.carouselMediaIds.length) {
+    if (!v.platforms.includes('instagram') || v.platforms.length !== 1)
+      throw new AppError('Carousels currently publish to Instagram only.');
+    if (ids.some((id) => !rows.find((row) => row.id === id)?.mime.startsWith('image/')))
+      throw new AppError('Choose images for every carousel slide.');
+  }
+  if (v.platforms.includes('youtube')) {
+    if (!media.mime.startsWith('video/')) throw new AppError('YouTube requires a video. Use an image as its thumbnail.');
+    if (v.youtubeFormat === 'short') {
+      const error = shortsEligibility(v.videoMetadata);
+      if (error) throw new AppError(error);
+    }
+  }
+  return media;
+}
 export async function postJson(env: Env, p: PostRow, suppliedTargets?: Target[]) {
   const targets =
     suppliedTargets ||
@@ -17,6 +38,7 @@ export async function postJson(env: Env, p: PostRow, suppliedTargets?: Target[])
     title: p.title,
     caption: p.caption,
     mediaId: p.media_id,
+    carouselMediaIds: JSON.parse(p.carousel_media_ids || '[]'),
     platforms: targets.map((t) => t.platform),
     status: p.status,
     scheduledFor: p.scheduled_for || undefined,
@@ -62,18 +84,11 @@ api.get('/posts', async (c) => {
 api.post('/posts', async (c) => {
   const v = postInput.parse(await c.req.json()),
     user = c.get('user').id;
-  const media = await c.env.DB.prepare('SELECT id,mime FROM media WHERE id=? AND user_id=?')
-    .bind(v.mediaId, user)
-    .first<{ id: string; mime: string }>();
-  if (!media) throw new AppError('Select an uploaded media asset.');
+  await validatePostMedia(c.env, user, v);
   if (v.thumbnailMediaId) {
-    const thumbnail = await c.env.DB.prepare("SELECT id FROM media WHERE id=? AND user_id=? AND mime LIKE 'image/%'").bind(v.thumbnailMediaId, user).first();
+    const thumbnail = await c.env.DB.prepare("SELECT id,mime,size FROM media WHERE id=? AND user_id=? AND mime LIKE 'image/%'").bind(v.thumbnailMediaId, user).first<{id: string; mime: string; size: number}>();
     if (!thumbnail) throw new AppError('Select a valid thumbnail image.');
-  }
-  if (v.platforms.includes('youtube') && v.youtubeFormat === 'short') {
-    if (!media.mime.startsWith('video/')) throw new AppError('YouTube Shorts require a video.');
-    const error = shortsEligibility(v.videoMetadata);
-    if (error) throw new AppError(error);
+    if (v.platforms.includes('youtube') && (!['image/jpeg', 'image/png'].includes(thumbnail.mime) || thumbnail.size > 50 * 1024 ** 2)) throw new AppError('YouTube thumbnails must be JPG or PNG and at most 50 MB.');
   }
   if (v.action === 'schedule' && (!v.scheduledFor || Date.parse(v.scheduledFor) <= Date.now()))
     throw new AppError('Choose a future schedule time.');
@@ -82,7 +97,7 @@ api.post('/posts', async (c) => {
     status = v.action === 'draft' ? 'draft' : v.action === 'schedule' ? 'scheduled' : 'publishing';
   const statements = [
     c.env.DB.prepare(
-      'INSERT INTO posts(id,user_id,media_id,title,caption,status,scheduled_for,created_at,updated_at,attempts,hashtags,thumbnail_media_id,thumbnail_text,thumbnail_ideas) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+      'INSERT INTO posts(id,user_id,media_id,title,caption,status,scheduled_for,created_at,updated_at,attempts,hashtags,thumbnail_media_id,thumbnail_text,thumbnail_ideas,carousel_media_ids) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
     ).bind(
       id,
       user,
@@ -98,6 +113,7 @@ api.post('/posts', async (c) => {
       v.thumbnailMediaId || null,
       v.thumbnailText ?? '',
       v.thumbnailIdeas ?? '',
+      JSON.stringify(v.carouselMediaIds),
     ),
     ...v.platforms.map((p) =>
       c.env.DB.prepare('INSERT INTO targets(post_id,platform,data) VALUES(?,?,?)').bind(
@@ -142,25 +158,18 @@ api.put('/posts/:id', async (c) => {
     .bind(id)
     .first();
   if (active) throw new AppError('This project is currently publishing and cannot be edited.', 409);
-  const media = await c.env.DB.prepare('SELECT id,mime FROM media WHERE id=? AND user_id=?')
-    .bind(v.mediaId, user)
-    .first<{ id: string; mime: string }>();
-  if (!media) throw new AppError('Select an uploaded media asset.');
+  await validatePostMedia(c.env, user, v);
   if (v.thumbnailMediaId) {
-    const thumbnail = await c.env.DB.prepare("SELECT id FROM media WHERE id=? AND user_id=? AND mime LIKE 'image/%'").bind(v.thumbnailMediaId, user).first();
+    const thumbnail = await c.env.DB.prepare("SELECT id,mime,size FROM media WHERE id=? AND user_id=? AND mime LIKE 'image/%'").bind(v.thumbnailMediaId, user).first<{id: string; mime: string; size: number}>();
     if (!thumbnail) throw new AppError('Select a valid thumbnail image.');
-  }
-  if (v.platforms.includes('youtube') && v.youtubeFormat === 'short') {
-    if (!media.mime.startsWith('video/')) throw new AppError('YouTube Shorts require a video.');
-    const error = shortsEligibility(v.videoMetadata);
-    if (error) throw new AppError(error);
+    if (v.platforms.includes('youtube') && (!['image/jpeg', 'image/png'].includes(thumbnail.mime) || thumbnail.size > 50 * 1024 ** 2)) throw new AppError('YouTube thumbnails must be JPG or PNG and at most 50 MB.');
   }
   if (v.action === 'schedule' && (!v.scheduledFor || Date.parse(v.scheduledFor) <= Date.now()))
     throw new AppError('Choose a future schedule time.');
   const time = now();
   await c.env.DB.batch([
     c.env.DB.prepare(
-      'UPDATE posts SET media_id=?,title=?,caption=?,status=?,scheduled_for=?,updated_at=?,last_error=NULL,hashtags=?,thumbnail_media_id=?,thumbnail_text=?,thumbnail_ideas=? WHERE id=? AND user_id=?',
+      'UPDATE posts SET media_id=?,title=?,caption=?,status=?,scheduled_for=?,updated_at=?,last_error=NULL,hashtags=?,thumbnail_media_id=?,thumbnail_text=?,thumbnail_ideas=?,carousel_media_ids=? WHERE id=? AND user_id=?',
     ).bind(
       v.mediaId,
       v.title,
@@ -172,6 +181,7 @@ api.put('/posts/:id', async (c) => {
       v.thumbnailMediaId || null,
       v.thumbnailText ?? post.thumbnail_text ?? '',
       v.thumbnailIdeas ?? post.thumbnail_ideas ?? '',
+      JSON.stringify(v.carouselMediaIds),
       id,
       user,
     ),

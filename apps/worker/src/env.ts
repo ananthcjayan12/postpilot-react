@@ -29,6 +29,7 @@ export type PostRow = {
   id: string;
   user_id: string;
   media_id: string;
+  carousel_media_ids: string;
   title: string;
   caption: string;
   status: string;

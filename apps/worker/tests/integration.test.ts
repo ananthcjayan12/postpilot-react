@@ -12,7 +12,7 @@ import { uploadVideo } from '../src/gemini';
 import { hash, seal, unseal, signMedia, validMediaSignature, now, saveCredential } from '../src/lib';
 import { ownerAllowed } from '../src/auth';
 import { dispatch } from '../src/posts';
-import { confirmedOffset, youtubeChunk, publishFacebook, publishInstagram } from '../src/publish';
+import { confirmedOffset, youtubeChunk, publishFacebook, publishInstagram, createInstagram } from '../src/publish';
 import type { Env, PostRow, MediaRow } from '../src/env';
 const e = env as unknown as Env & { TEST_MIGRATIONS: any };
 const token = 'test-owner-session',
@@ -218,6 +218,22 @@ describe('session and API boundaries', () => {
       expect(response.status).toBe(201);
       expect((await response.json() as any).youtubeFormat).toBe('short');
     }
+  });
+  it('saves Instagram image carousels and rejects incompatible targets or unowned slides', async () => {
+    const first = crypto.randomUUID();
+    const second = crypto.randomUUID();
+    for (const id of [first, second]) await e.DB.prepare('INSERT INTO media VALUES(?,?,?,?,?,?,?)').bind(id, user, id, `${id}.jpg`, 'image/jpeg', 4, now()).run();
+    const input = { title: 'Photo set', mediaId: first, carouselMediaIds: [second], platforms: ['instagram'], action: 'draft' };
+    const created = await call('/api/posts', 'POST', input);
+    expect(created.status).toBe(201);
+    const post: any = await created.json();
+    expect(post.carouselMediaIds).toEqual([second]);
+    expect(((await call('/api/posts')).json() as Promise<any[]>).then((posts) => posts[0].carouselMediaIds)).resolves.toEqual([second]);
+    expect((await call('/api/posts', 'POST', { ...input, platforms: ['instagram', 'facebook'] })).status).toBe(400);
+    expect((await call('/api/posts', 'POST', { ...input, carouselMediaIds: [first] })).status).toBe(400);
+    expect((await call('/api/posts', 'POST', { ...input, carouselMediaIds: [crypto.randomUUID()] })).status).toBe(400);
+    expect((await call('/api/posts', 'POST', { ...input, platforms: ['youtube'], carouselMediaIds: [] })).status).toBe(400);
+    expect((await call(`/api/media/${second}`, 'DELETE')).status).toBe(409);
   });
   it('round-trips thumbnail writing through draft creation, edits, legacy saves, and clearing', async () => {
     const { media } = await seed();
@@ -441,6 +457,22 @@ describe('encryption and media', () => {
   });
 });
 describe('durable publishing boundaries', () => {
+  it('creates Instagram carousel items in order and resumes without recreating them', async () => {
+    const { post, media } = await seed('instagram');
+    const second = crypto.randomUUID();
+    await e.DB.prepare('INSERT INTO media VALUES(?,?,?,?,?,?,?)').bind(second, user, second, 'second.jpg', 'image/jpeg', 4, now()).run();
+    await e.DB.prepare('UPDATE media SET mime=? WHERE id=?').bind('image/jpeg', media.id).run();
+    await e.DB.prepare('UPDATE posts SET carousel_media_ids=? WHERE id=?').bind(JSON.stringify([second]), post.id).run();
+    await saveCredential(e, user, 'instagram', { accessToken: 'test', userId: 'ig', expiryDate: Date.now() + 3600000 });
+    const current = (await e.DB.prepare('SELECT * FROM posts WHERE id=?').bind(post.id).first<PostRow>())!;
+    const firstImage = { ...media, mime: 'image/jpeg' };
+    for (const id of ['child1', 'child2', 'parent']) mockProvider('https://graph.instagram.com/v25.0/ig/media', { id }, 'POST');
+    const publicEnv = { ...e, APP_ORIGIN: 'https://postpilot.example' } as Env;
+    await createInstagram(publicEnv, current, firstImage);
+    await createInstagram(publicEnv, current, firstImage);
+    const target: any = await e.DB.prepare('SELECT * FROM targets WHERE post_id=?').bind(post.id).first();
+    expect(JSON.parse(target.data)).toEqual({ children: ['child1', 'child2'], container: 'parent' });
+  });
   it('concurrent schedule dispatch claims a due post once', async () => {
     const { post } = await seed();
     await e.DB.prepare("UPDATE posts SET status='scheduled',scheduled_for=? WHERE id=?")
@@ -536,6 +568,21 @@ describe('durable publishing boundaries', () => {
     expect(JSON.parse(row.data).youtubeFormat).toBe('short');
     expect(JSON.parse(row.data).url).toBe('https://www.youtube.com/shorts/video123');
     expect(await youtubeChunk(e, post, media)).toBe(true);
+  });
+  it('uploads the chosen image as a YouTube video thumbnail', async () => {
+    const { post, media } = await seed();
+    const thumbnail = crypto.randomUUID();
+    await e.MEDIA.put(thumbnail, new Uint8Array([1, 2, 3]), { httpMetadata: { contentType: 'image/jpeg' } });
+    await e.DB.prepare('INSERT INTO media VALUES(?,?,?,?,?,?,?)').bind(thumbnail, user, thumbnail, 'cover.jpg', 'image/jpeg', 3, now()).run();
+    await e.DB.prepare('UPDATE posts SET thumbnail_media_id=? WHERE id=?').bind(thumbnail, post.id).run();
+    await e.DB.prepare("UPDATE targets SET status='processing',data=? WHERE post_id=?").bind(JSON.stringify({ youtubeFormat: 'video', id: 'video123' }), post.id).run();
+    await saveCredential(e, user, 'google', { accessToken: 'test', expiryDate: Date.now() + 3600000 });
+    mockProvider('https://www.googleapis.com/upload/youtube/v3/thumbnails/set?videoId=video123&uploadType=media', { items: [] }, 'POST');
+    const current = (await e.DB.prepare('SELECT * FROM posts WHERE id=?').bind(post.id).first<PostRow>())!;
+    expect(await youtubeChunk(e, current, media)).toBe(true);
+    const target: any = await e.DB.prepare('SELECT * FROM targets WHERE post_id=?').bind(post.id).first();
+    expect(target.status).toBe('success');
+    expect(JSON.parse(target.data).id).toBe('video123');
   });
   it('does not repeat an uncertain Facebook side effect', async () => {
     const { post, media } = await seed('facebook');
