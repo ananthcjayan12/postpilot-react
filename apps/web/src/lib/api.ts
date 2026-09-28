@@ -58,6 +58,7 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 export type { CompanionDevice } from '@postpilot/shared';
+export type ApiKeyRecord = { id: string; name: string; prefix: string; createdAt: string; lastUsedAt: string | null };
 export const localGeneration = new EventTarget();
 let activeLocalJob: string | null = null;
 async function textRequest<T>(url: string, init: RequestInit): Promise<T> {
@@ -77,6 +78,9 @@ async function textRequest<T>(url: string, init: RequestInit): Promise<T> {
   } finally {activeLocalJob=null;notify('');}
 }
 export const api = {
+  apiKeys: () => request<ApiKeyRecord[]>('/api/keys'),
+  createApiKey: (name: string) => request<ApiKeyRecord & { token: string }>('/api/keys', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) }),
+  revokeApiKey: (id: string) => request<{ ok: true }>(`/api/keys/${id}`, { method: 'DELETE' }),
   companionDevices: () => request<CompanionDevice[]>('/api/companion/devices'),
   pairCompanion: () => request<{code:string;expiresAt:number}>('/api/companion/devices/pairing',{method:'POST'}),
   revokeCompanion: (id:string) => request(`/api/companion/devices/${id}`,{method:'DELETE'}),

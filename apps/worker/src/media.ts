@@ -3,10 +3,10 @@ import { AwsClient } from 'aws4fetch';
 import { z } from 'zod';
 import { uploadInput, PART_SIZE } from '@postpilot/shared';
 import type { AppEnv, Env, MediaRow } from './env';
-import { requireSession } from './auth';
+import { requireSessionOrApiKey } from './auth';
 import { AppError, now, validMediaSignature } from './lib';
 export const media = new Hono<AppEnv>();
-media.use('*', requireSession);
+media.use('*', requireSessionOrApiKey);
 type Upload = {
   id: string;
   user_id: string;

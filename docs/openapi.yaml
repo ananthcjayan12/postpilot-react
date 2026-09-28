@@ -1,0 +1,384 @@
+openapi: 3.1.0
+info:
+  title: PostPilot external API
+  version: 1.0.0
+  description: >-
+    Cloudflare Worker API for the owner's PostPilot workspace. Create a bearer key
+    in Settings. Account OAuth and key management require a signed-in studio session.
+servers:
+  - url: https://YOUR-ORIGIN
+security:
+  - ApiKey: []
+components:
+  securitySchemes:
+    ApiKey:
+      type: http
+      scheme: bearer
+      bearerFormat: PostPilot API key
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string }
+        details: { type: object }
+    Media:
+      type: object
+      required: [id, originalName, fileName, mimeType, size, createdAt, localUrl]
+      properties:
+        id: { type: string, format: uuid }
+        originalName: { type: string }
+        fileName: { type: string }
+        mimeType: { type: string }
+        size: { type: integer }
+        createdAt: { type: string, format: date-time }
+        localUrl: { type: string, description: Studio preview URL; requires a browser session. }
+    PostInput:
+      type: object
+      required: [title, mediaId, platforms, action]
+      properties:
+        title: { type: string, minLength: 1, maxLength: 100 }
+        caption: { type: string, maxLength: 5000, default: '' }
+        mediaId: { type: string, format: uuid }
+        carouselMediaIds:
+          type: array
+          maxItems: 9
+          items: { type: string, format: uuid }
+          description: Additional Instagram carousel slides in order.
+        platforms:
+          type: array
+          minItems: 1
+          maxItems: 3
+          items: { type: string, enum: [youtube, instagram, facebook] }
+        action: { type: string, enum: [draft, schedule, publish] }
+        scheduledFor: { type: string, format: date-time }
+        youtubeFormat: { type: string, enum: [video, short], default: video }
+        videoMetadata:
+          type: object
+          required: [width, height, duration]
+          properties:
+            width: { type: integer, minimum: 1 }
+            height: { type: integer, minimum: 1 }
+            duration: { type: number, exclusiveMinimum: 0 }
+        hashtags: { type: string, maxLength: 1000 }
+        thumbnailMediaId: { type: [string, 'null'], format: uuid }
+        thumbnailText: { type: string, maxLength: 100 }
+        thumbnailIdeas: { type: string, maxLength: 1000 }
+    Post:
+      type: object
+      required: [id, title, caption, mediaId, carouselMediaIds, platforms, status, createdAt, updatedAt, results, attempts, targetStatuses]
+      properties:
+        id: { type: string, format: uuid }
+        title: { type: string }
+        caption: { type: string }
+        mediaId: { type: string, format: uuid }
+        carouselMediaIds: { type: array, items: { type: string, format: uuid } }
+        platforms: { type: array, items: { type: string, enum: [youtube, instagram, facebook] } }
+        status: { type: string, enum: [draft, scheduled, publishing, published, partial, failed] }
+        scheduledFor: { type: string, format: date-time }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        attempts: { type: integer }
+        lastError: { type: string }
+        results:
+          type: object
+          additionalProperties:
+            type: object
+            properties:
+              ok: { type: boolean }
+              id: { type: string }
+              url: { type: string }
+              error: { type: string }
+        targetStatuses:
+          type: object
+          additionalProperties:
+            type: string
+            enum: [pending, uploading, processing, sending, success, failed, review, deleted]
+    UploadPart:
+      type: object
+      required: [partNumber, etag]
+      properties:
+        partNumber: { type: integer, minimum: 1 }
+        etag: { type: string }
+    SocialAiInput:
+      type: object
+      required: [title]
+      properties:
+        title: { type: string, minLength: 1, maxLength: 100 }
+        caption: { type: string, maxLength: 5000 }
+        referenceMediaId: { type: string, format: uuid }
+        orientation: { type: string, enum: [horizontal, vertical], default: horizontal }
+        thumbnailText: { type: string, minLength: 1, maxLength: 100 }
+        feedback: { type: string, maxLength: 500 }
+        imageIdeas: { type: string, maxLength: 1000 }
+        regenerationFeedback: { type: string, maxLength: 1000 }
+        preserveReferenceBranding: { type: boolean, default: false }
+        referenceMode: { type: string, enum: [preserve, style], default: style }
+    SettingsInput:
+      type: object
+      required: [youtube, instagram, facebook, notify, confirm]
+      properties:
+        youtube: { type: boolean }
+        instagram: { type: boolean }
+        facebook: { type: boolean }
+        notify: { type: boolean }
+        confirm: { type: boolean }
+        schedulerEnabled: { type: boolean }
+        thumbnailPeople: { type: string, enum: [auto, indian, western, african, chinese, east_asian, southeast_asian, middle_eastern, latino, diverse, none] }
+        geminiApiKey: { type: [string, 'null'], writeOnly: true, description: Null removes the saved key; omit to preserve it. }
+        openaiApiKey: { type: [string, 'null'], writeOnly: true, description: Null removes the saved key; omit to preserve it. }
+        aiRoutes:
+          type: object
+          properties:
+            metadata: { type: string }
+            hashtags: { type: string }
+            thumbnailCopy: { type: string }
+            thumbnail: { type: string }
+            thumbnailResolution: { type: string, enum: [1K, 2K, 4K] }
+        contentLanguage:
+          type: object
+          properties:
+            mode: { type: string, enum: [english, malayalam, malayalam_english, custom] }
+            custom: { type: string, maxLength: 120 }
+  parameters:
+    PostId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    MediaId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    Platform:
+      name: platform
+      in: path
+      required: true
+      schema: { type: string, enum: [youtube, instagram, facebook] }
+  responses:
+    Error:
+      description: Request failed.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+paths:
+  /health:
+    get:
+      security: []
+      summary: Worker health
+      responses:
+        '200': { description: Healthy }
+  /api/accounts:
+    get:
+      summary: Connected provider accounts and readiness
+      responses:
+        '200': { description: Account map and readiness flags }
+  /api/media:
+    get:
+      summary: List uploaded media
+      responses:
+        '200':
+          description: Media assets
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/Media' } }
+  /api/media/{id}:
+    parameters: [{ $ref: '#/components/parameters/MediaId' }]
+    get:
+      summary: Get media metadata
+      responses:
+        '200': { description: Media asset, content: { application/json: { schema: { $ref: '#/components/schemas/Media' } } } }
+        '404': { $ref: '#/components/responses/Error' }
+    delete:
+      summary: Delete media and posts using it
+      responses:
+        '200': { description: Deleted }
+  /api/media/uploads:
+    post:
+      summary: Start multipart upload
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, type, size]
+              properties:
+                name: { type: string, minLength: 1, maxLength: 255 }
+                type: { type: string, enum: [image/jpeg, image/png, image/webp, video/mp4, video/quicktime, video/webm] }
+                size: { type: integer, minimum: 1, maximum: 5368709120 }
+      responses:
+        '201': { description: Upload ID, partSize, and parts count }
+  /api/media/uploads/{id}/parts:
+    parameters: [{ $ref: '#/components/parameters/MediaId' }]
+    post:
+      summary: Get signed PUT URL for a part
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [partNumber]
+              properties:
+                partNumber: { type: integer, minimum: 1 }
+      responses:
+        '200': { description: URL and local flag }
+  /api/media/uploads/{id}/complete:
+    parameters: [{ $ref: '#/components/parameters/MediaId' }]
+    post:
+      summary: Complete multipart upload
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [parts]
+              properties:
+                parts: { type: array, minItems: 1, items: { $ref: '#/components/schemas/UploadPart' } }
+      responses:
+        '201': { description: Media asset, content: { application/json: { schema: { $ref: '#/components/schemas/Media' } } } }
+        '200': { description: Already completed }
+  /api/media/uploads/{id}/abort:
+    parameters: [{ $ref: '#/components/parameters/MediaId' }]
+    post:
+      summary: Abort upload
+      responses:
+        '200': { description: Aborted }
+  /api/posts:
+    get:
+      summary: List posts
+      responses:
+        '200':
+          description: Posts
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/Post' } }
+    post:
+      summary: Create draft, schedule, or start publishing
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PostInput' }
+      responses:
+        '201': { description: Created post, content: { application/json: { schema: { $ref: '#/components/schemas/Post' } } } }
+  /api/posts/{id}:
+    parameters: [{ $ref: '#/components/parameters/PostId' }]
+    get:
+      summary: Get post and per-platform status
+      responses:
+        '200': { description: Post, content: { application/json: { schema: { $ref: '#/components/schemas/Post' } } } }
+    put:
+      summary: Replace draft or scheduled post
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PostInput' }
+      responses:
+        '200': { description: Updated post }
+  /api/posts/{id}/publish:
+    parameters: [{ $ref: '#/components/parameters/PostId' }]
+    post:
+      summary: Start asynchronous publication
+      responses:
+        '200': { description: Current post }
+  /api/posts/{id}/retry:
+    parameters: [{ $ref: '#/components/parameters/PostId' }]
+    post:
+      summary: Retry failed targets
+      responses:
+        '200': { description: Current post }
+  /api/posts/{id}/targets/{platform}/resolve:
+    parameters: [{ $ref: '#/components/parameters/PostId' }, { $ref: '#/components/parameters/Platform' }]
+    post:
+      summary: Resolve uncertain provider outcome after account inspection
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [outcome, confirmation]
+              properties:
+                outcome: { type: string, enum: [published, not_published] }
+                remoteId: { type: string, maxLength: 200 }
+                confirmation: { type: string, const: I checked the provider account }
+      responses:
+        '200': { description: Resolved }
+  /api/posts/{id}/targets/{platform}:
+    parameters: [{ $ref: '#/components/parameters/PostId' }, { $ref: '#/components/parameters/Platform' }]
+    delete:
+      summary: Delete published provider item
+      responses:
+        '200': { description: Deleted }
+  /api/analytics:
+    get:
+      summary: Local publishing activity
+      responses:
+        '200': { description: Counts, platforms, and recent activity }
+  /api/settings:
+    get:
+      summary: Workspace settings and AI configuration status
+      responses:
+        '200': { description: Settings }
+    put:
+      summary: Replace workspace settings
+      description: Preserve the full GET response's editable fields; see external-api.md.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SettingsInput' }
+      responses:
+        '200': { description: Updated settings }
+  /api/ai/suggest:
+    post:
+      summary: Video title and description suggestions
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [mediaId]
+              properties:
+                mediaId: { type: string, format: uuid }
+                youtubeFormat: { type: string, enum: [video, short], default: video }
+      responses:
+        '200': { description: Five titles and a description }
+  /api/ai/hashtags:
+    post:
+      summary: Generate Instagram hashtags
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SocialAiInput' }
+      responses:
+        '200': { description: Hashtags and model }
+        '202': { description: Local companion job queued }
+  /api/ai/thumbnail-copy:
+    post:
+      summary: Generate thumbnail headline
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SocialAiInput' }
+      responses:
+        '200': { description: Headline and model }
+        '202': { description: Local companion job queued }
+  /api/ai/thumbnail:
+    post:
+      summary: Generate thumbnail media asset
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SocialAiInput' }
+      responses:
+        '201': { description: Generated media asset and model }

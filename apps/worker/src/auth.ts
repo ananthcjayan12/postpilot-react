@@ -30,6 +30,21 @@ export async function requireSession(c: Context<AppEnv>, next: Next) {
   }
   await next();
 }
+export async function requireSessionOrApiKey(c: Context<AppEnv>, next: Next) {
+  const authorization = c.req.header('Authorization');
+  if (!authorization) return requireSession(c, next);
+  const match = /^Bearer (ppk_[A-Za-z0-9_-]{43})$/.exec(authorization);
+  if (!match) throw new AppError('Invalid API key.', 401);
+  const key = await c.env.DB.prepare(
+    'SELECT k.id,u.id AS user_id,u.email,u.name FROM api_keys k JOIN users u ON u.id=k.user_id WHERE k.token_hash=? AND k.revoked_at IS NULL',
+  ).bind(await hash(match[1])).first<{ id: string; user_id: string; email: string; name: string }>();
+  if (!key || !ownerAllowed(c.env.ALLOWED_OWNER_EMAIL, key.email))
+    throw new AppError('Invalid API key.', 401);
+  c.set('user', { id: key.user_id, email: key.email, name: key.name });
+  c.set('csrf', '');
+  c.executionCtx.waitUntil(c.env.DB.prepare('UPDATE api_keys SET last_used_at=? WHERE id=?').bind(now(), key.id).run());
+  await next();
+}
 export function ownerAllowed(allowlist: string | undefined, email: string) {
   return !!allowlist
     ?.split(',')

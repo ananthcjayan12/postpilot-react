@@ -4,6 +4,7 @@ import { ZodError } from 'zod';
 import type { AppEnv, Env } from './env';
 import { AppError } from './lib';
 import { auth, requireSession } from './auth';
+import { apiKeys } from './api-keys';
 import { oauth } from './oauth';
 import { media, mediaResponse, cleanupUploads } from './media';
 import { api, dispatch } from './posts';
@@ -26,6 +27,7 @@ app.use('*', async (c, next) => {
 });
 app.get('/health', (c) => c.json({ ok: true, service: 'postpilot-worker' }));
 app.route('/api/auth', auth);
+app.route('/api/keys', apiKeys);
 app.route('/api/oauth', oauth);
 app.route('/api/media', media);
 app.route('/api/ai', gemini);

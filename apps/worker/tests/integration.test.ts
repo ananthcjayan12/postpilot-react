@@ -40,6 +40,7 @@ beforeEach(async () => {
     'accounts',
     'settings',
     'oauth_states',
+    'api_keys',
     'sessions',
     'users',
   ])
@@ -112,6 +113,25 @@ async function seed(platform = 'youtube') {
   };
 }
 describe('session and API boundaries', () => {
+  it('creates, uses, and revokes a bearer API key without a browser session', async () => {
+    const created = await call('/api/keys', 'POST', { name: 'Other app' });
+    expect(created.status).toBe(201);
+    const { id, token: apiToken } = await created.json() as { id: string; token: string };
+    expect(apiToken).toMatch(/^ppk_/);
+    expect(JSON.stringify(await (await call('/api/keys')).json())).not.toContain(apiToken);
+    const bearer = { Authorization: `Bearer ${apiToken}` };
+    expect((await call('/api/accounts', 'GET', undefined, false, bearer)).status).toBe(200);
+    expect((await call('/api/posts', 'GET', undefined, false, bearer)).status).toBe(200);
+    const { media } = await seed();
+    const draft = await call('/api/posts', 'POST', { title: 'External draft', mediaId: media.id, platforms: ['youtube'], action: 'draft' }, false, bearer);
+    expect(draft.status).toBe(201);
+    const postId = (await draft.json() as { id: string }).id;
+    expect((await call(`/api/posts/${postId}`, 'GET', undefined, false, bearer)).status).toBe(200);
+    expect((await call('/api/keys', 'GET', undefined, false, bearer)).status).toBe(401);
+    expect((await call('/api/accounts', 'GET', undefined, false, { Authorization: 'Bearer ppk_invalid' })).status).toBe(401);
+    expect((await call(`/api/keys/${id}`, 'DELETE')).status).toBe(200);
+    expect((await call('/api/accounts', 'GET', undefined, false, bearer)).status).toBe(401);
+  });
   it('transfers a video in bounded chunks with exact bytes and finalizes only the last chunk', async () => {
     const { media } = await seed();
     const chunkSize = 8 * 1024 ** 2;

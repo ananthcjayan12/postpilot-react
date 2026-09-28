@@ -1,4 +1,5 @@
 import { CompanionSettings } from '../components/CompanionSettings';
+import { ApiKeys } from '../components/ApiKeys';
 import { thumbnailPeopleOptions, thumbnailIs1KOnly } from '@postpilot/shared';
 import { BellRing, Database, Save, Shield, Sparkles, TimerReset } from 'lucide-react';
 import { useEffect, useState } from 'react';
@@ -64,6 +65,7 @@ export function Settings() {
         </button>
       </div>
       <div className="settings-grid">
+        <ApiKeys />
         <CompanionSettings />
         <section className="panel settings-card wide-card">
           <div className="settings-icon purple"><Sparkles /></div>

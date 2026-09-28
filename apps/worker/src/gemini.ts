@@ -4,10 +4,10 @@ import { z } from 'zod';
 import type { AppEnv, MediaRow } from './env';
 import { AppError, getCredential } from './lib';
 import { defaultSettings, thumbnailPeopleSchema, thumbnailPeopleOptions, thumbnailIs1KOnly } from '@postpilot/shared';
-import { requireSession } from './auth';
+import { requireSessionOrApiKey } from './auth';
 
 export const gemini = new Hono<AppEnv>();
-gemini.use('*', requireSession);
+gemini.use('*', requireSessionOrApiKey);
 
 const input = z.object({
   mediaId: z.string().uuid(),

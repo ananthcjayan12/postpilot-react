@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>PostPilot API guide</title><style>body{font:16px/1.55 system-ui,sans-serif;max-width:900px;margin:3rem auto;padding:0 1.25rem;color:#152238}h1,h2{line-height:1.2}h2{margin-top:2.5rem}code,pre{background:#f1f5f9;border-radius:5px}code{padding:.1rem .3rem}pre{padding:1rem;overflow:auto}table{border-collapse:collapse;width:100%}td,th{border:1px solid #d8e0ea;padding:.5rem;text-align:left}a{color:#2357bf}</style></head><body>
+<h1>PostPilot external API</h1>
+<p>Use the deployed PostPilot origin as the base URL. In Settings → External API access, create a key and copy it once. Keep it on your app's server. Send <code>Authorization: Bearer ppk_...</code> for the routes below. Connect YouTube, Instagram, and Facebook in the studio Accounts page first.</p>
+<h2>Supported publishing</h2>
+<p>YouTube: videos and Shorts. Instagram: images, Reels, and 2–10 image carousels. Facebook Page: images and videos. Carousels target Instagram alone.</p>
+<h2>Upload flow</h2>
+<ol><li><code>POST /api/media/uploads</code> with <code>{"name":"clip.mp4","type":"video/mp4","size":12345678}</code>. Save <code>id</code>, <code>partSize</code>, and <code>parts</code>.</li><li>For each part, <code>POST /api/media/uploads/{id}/parts</code> with <code>{"partNumber":1}</code>. PUT exactly that part's bytes to the returned URL and record the ETag. For production R2 signed URLs, omit the bearer header on the PUT.</li><li><code>POST /api/media/uploads/{id}/complete</code> with <code>{"parts":[{"partNumber":1,"etag":"..."}]}</code>. Save the returned media <code>id</code>.</li></ol>
+<p>Each part is 8 MiB except the last. Upload sessions expire after 24 hours. Accepted MIME types: JPEG, PNG, WEBP, MP4, QuickTime, WEBM. Maximum 5 GiB per file. The <code>localUrl</code> in media responses is a studio preview URL.</p>
+<h2>Create and publish</h2>
+<pre>POST /api/posts
+{"title":"Launch day","caption":"Our new release","mediaId":"UUID","platforms":["instagram"],"action":"draft"}
+
+POST /api/posts/{id}/publish
+GET /api/posts/{id}</pre>
+<p>Draft first and retain the post ID before calling publish; this avoids creating duplicate posts if a create request times out. Publishing is asynchronous. Poll the post for <code>status</code>, <code>targetStatuses</code>, <code>results</code>, and <code>lastError</code>. Final statuses are <code>published</code>, <code>partial</code>, or <code>failed</code>. Use <code>POST /api/posts/{id}/retry</code> for failed targets. A target marked <code>review</code> requires checking the provider account before retrying.</p>
+<p>For an Instagram carousel, use the first slide as <code>mediaId</code>, additional slides in <code>carouselMediaIds</code> in order, and <code>platforms:["instagram"]</code>. For a Short, use <code>youtubeFormat:"short"</code> and <code>videoMetadata:{"width":1080,"height":1920,"duration":30}</code>. To schedule, use <code>action:"schedule"</code> and a future UTC <code>scheduledFor</code> such as <code>2026-10-01T09:00:00Z</code>.</p>
+<h2>Endpoint reference</h2>
+<table><tr><th>Method</th><th>Path</th><th>Purpose</th></tr>
+<tr><td>GET</td><td>/api/accounts</td><td>Connected providers and readiness</td></tr>
+<tr><td>GET</td><td>/api/media, /api/media/{id}</td><td>List or inspect assets</td></tr>
+<tr><td>DELETE</td><td>/api/media/{id}</td><td>Delete asset and associated posts</td></tr>
+<tr><td>GET</td><td>/api/posts, /api/posts/{id}</td><td>List or inspect posts</td></tr>
+<tr><td>POST</td><td>/api/posts</td><td>Create draft, schedule, or publish</td></tr>
+<tr><td>PUT</td><td>/api/posts/{id}</td><td>Replace draft or scheduled post</td></tr>
+<tr><td>POST</td><td>/api/posts/{id}/publish, /retry</td><td>Publish or retry failed targets</td></tr>
+<tr><td>POST</td><td>/api/posts/{id}/targets/{platform}/resolve</td><td>Resolve uncertain provider result</td></tr>
+<tr><td>DELETE</td><td>/api/posts/{id}/targets/{platform}</td><td>Delete published provider item</td></tr>
+<tr><td>GET</td><td>/api/analytics, /api/settings</td><td>Read activity and preferences</td></tr>
+<tr><td>PUT</td><td>/api/settings</td><td>Update workspace settings</td></tr>
+<tr><td>POST</td><td>/api/ai/suggest, /hashtags, /thumbnail-copy, /thumbnail</td><td>AI content services</td></tr></table>
+<p>JSON errors have <code>error</code> and sometimes validation <code>details</code>. Common status codes are 400, 401, 404, 409, 410, 413, and 503. API keys have full workspace access; revoke unused keys in Settings. Account OAuth and key management require a signed-in studio session.</p>
+</body></html>

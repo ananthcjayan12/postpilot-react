@@ -3,9 +3,15 @@ import { z } from 'zod';
 import { postInput, settingsInput, defaultSettings, shortsEligibility, thumbnailIs1KOnly } from '@postpilot/shared';
 import type { AppEnv, Env, PostRow, Target } from './env';
 import { AppError, getCredential, now, saveCredential } from './lib';
-import { requireSession } from './auth';
+import { requireSessionOrApiKey } from './auth';
 export const api = new Hono<AppEnv>();
-api.use('*', requireSession);
+api.use('*', requireSessionOrApiKey);
+api.get('/posts/:id', async (c) => {
+  const post = await c.env.DB.prepare('SELECT * FROM posts WHERE id=? AND user_id=?')
+    .bind(c.req.param('id'), c.get('user').id).first<PostRow>();
+  if (!post) throw new AppError('Post not found.', 404);
+  return c.json(await postJson(c.env, post));
+});
 async function validatePostMedia(env: Env, user: string, v: { mediaId: string; carouselMediaIds: string[]; platforms: string[]; youtubeFormat: string; videoMetadata?: Parameters<typeof shortsEligibility>[0] }) {
   const ids = [v.mediaId, ...v.carouselMediaIds];
   if (new Set(ids).size !== ids.length) throw new AppError('Choose each carousel image only once.');
