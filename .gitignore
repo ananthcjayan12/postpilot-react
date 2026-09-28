@@ -18,3 +18,9 @@ coverage/
 *.tsbuildinfo
 output/playwright/
 .playwright-cli/
+
+apps/companion-desktop/src-tauri/target/
+apps/companion-desktop/src-tauri/gen/
+
+apps/companion-desktop/src-tauri/release.config.json
+apps/companion-desktop/release-assets/

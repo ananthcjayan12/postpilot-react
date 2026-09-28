@@ -1,3 +1,4 @@
+import { enqueueText } from './companion';
 import { Hono } from 'hono';
 import { z } from 'zod';
 import type { AppEnv, MediaRow } from './env';
@@ -74,7 +75,9 @@ function encodeBase64(bytes: Uint8Array) {
   return btoa(value);
 }
 async function generateThumbnailCopy(env: AppEnv['Bindings'], user: string, title: string, caption: string, feedback?: string) {
-  const route = routed((await routes(env, user)).thumbnailCopy);
+  const selected = (await routes(env, user)).thumbnailCopy;
+  if (/^(codex|antigravity):/.test(selected)) throw new AppError('Generate a headline before creating the thumbnail.',409);
+  const route = routed(selected);
   const key = await providerKey(env, user, route.provider);
   const language = await languageGuidance(env, user);
   const prompt = `Act as an expert Instagram and YouTube thumbnail copywriter. Write one compelling thumbnail headline that does two jobs: clearly conveys the specific subject or outcome of the video, and creates an honest curiosity gap that makes the intended viewer want to watch. ${language} When writing Malayalam, use natural, grammatically correct Malayalam with accurate spelling, vowel signs, chillu letters, and conjuncts. Proofread every word before returning it. Prefer familiar, unambiguous wording; do not invent words or awkward literal translations. Use 6 to 12 strong words and at most 84 characters. It should fit naturally across no more than two visual lines. Prefer a concrete transformation, tension, discovery, mistake, result, or unanswered question from the actual video. It must remain truthful and understandable without reading the caption. Do not simply repeat the video title. Avoid vague phrases, generic hype, hashtags, quotes, emoji, dishonest clickbait, or explanations. Return only the final headline.${feedback ? `\nUser feedback for this version: ${feedback}` : ''}\nVideo title: ${title}\nVideo caption: ${caption.slice(0, 1200)}`;
@@ -309,7 +312,9 @@ gemini.post('/suggest', async (c) => {
 
 gemini.post('/hashtags', async (c) => {
   const value = socialInput.parse(await c.req.json()), user = c.get('user').id;
-  const route = routed((await routes(c.env, user)).hashtags), key = await providerKey(c.env, user, route.provider);
+  const selected = (await routes(c.env, user)).hashtags;
+  if (/^(codex|antigravity):/.test(selected)) return c.json(await enqueueText(c.env,user,selected,'hashtags',{...value,language:await languageGuidance(c.env,user)},c.req.header('Idempotency-Key') || ''),202);
+  const route = routed(selected), key = await providerKey(c.env, user, route.provider);
   const language = await languageGuidance(c.env, user);
   const prompt = `Create 12 relevant Instagram hashtags for this video. ${language} Use hashtags appropriate to that audience, while retaining useful English discovery tags when relevant. Return only a single space-separated line of hashtags, each beginning with #. Avoid banned, misleading, or unrelated tags.\nTitle: ${value.title}\nCaption: ${value.caption}`;
   let text = '';
@@ -328,13 +333,15 @@ gemini.post('/hashtags', async (c) => {
     if (!response.ok) throw new AppError(`OpenAI hashtag generation failed (${response.status}).`, 502);
     text = body.output?.flatMap((o: any) => o.content || []).map((p: any) => p.text || '').join('') || '';
   }
-  const hashtags = (text.match(/#[\p{L}\p{N}_]+/gu) || []).slice(0, 30).join(' ');
+  const hashtags = (text.match(/#[\p{L}\p{M}\p{N}_]+/gu) || []).slice(0, 30).join(' ');
   if (!hashtags) throw new AppError('The AI provider returned no usable hashtags.', 502);
   return c.json({ hashtags, ...route });
 });
 
 gemini.post('/thumbnail-copy', async (c) => {
   const value = socialInput.parse(await c.req.json()), user = c.get('user').id;
+  const selected = (await routes(c.env,user)).thumbnailCopy;
+  if (/^(codex|antigravity):/.test(selected)) return c.json(await enqueueText(c.env,user,selected,'thumbnailCopy',{...value,language:await languageGuidance(c.env,user)},c.req.header('Idempotency-Key') || ''),202);
   const copy = await generateThumbnailCopy(c.env, user, value.title, value.caption, value.feedback);
   return c.json({ thumbnailText: copy.text, provider: copy.route.provider, model: copy.route.model });
 });

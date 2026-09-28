@@ -1,3 +1,4 @@
+import type { CompanionDevice } from '@postpilot/shared';
 import type { thumbnailPeopleOptions, ThumbnailModel } from '@postpilot/shared';
 import type { AccountsResponse, MediaAsset, Platform, PostRecord } from './types';
 
@@ -15,8 +16,8 @@ export type Settings = {
   openaiConfigured: boolean;
   aiRoutes: {
     metadata: 'gemini:gemini-3.8-flash' | 'gemini:gemini-2.5-flash';
-    hashtags: 'gemini:gemini-3.8-flash' | 'gemini:gemini-2.5-flash' | 'openai:gpt-5-mini' | 'openai:gpt-4.1-mini';
-    thumbnailCopy: 'gemini:gemini-3.8-flash' | 'gemini:gemini-2.5-flash' | 'openai:gpt-5-mini' | 'openai:gpt-4.1-mini';
+    hashtags: 'gemini:gemini-3.8-flash' | 'gemini:gemini-2.5-flash' | 'openai:gpt-5-mini' | 'openai:gpt-4.1-mini' | 'codex:local' | 'antigravity:local';
+    thumbnailCopy: 'gemini:gemini-3.8-flash' | 'gemini:gemini-2.5-flash' | 'openai:gpt-5-mini' | 'openai:gpt-4.1-mini' | 'codex:local' | 'antigravity:local';
     thumbnail: ThumbnailModel;
     thumbnailResolution: '1K' | '2K' | '4K';
   };
@@ -56,7 +57,31 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
   return body as T;
 }
 
+export type { CompanionDevice } from '@postpilot/shared';
+export const localGeneration = new EventTarget();
+let activeLocalJob: string | null = null;
+async function textRequest<T>(url: string, init: RequestInit): Promise<T> {
+  const value = await request<T & {jobId?:string}>(url, {...init, headers:{...init.headers, 'Idempotency-Key':crypto.randomUUID()}});
+  if (!value.jobId) return value;
+  activeLocalJob=value.jobId;
+  const notify=(status:string)=>localGeneration.dispatchEvent(new CustomEvent('status',{detail:status}));
+  try {
+    for(let attempt=0;attempt<350;attempt++) {
+      const job=await request<{status:string;result:T;error?:string}>(`/api/companion/requests/${value.jobId}`);
+      if(job.status==='succeeded')return job.result;
+      if(['failed','expired','cancelled'].includes(job.status))throw new Error(job.error || 'Local generation stopped.');
+      notify(job.status==='queued'?'Waiting for your computer…':'Generating on your computer…');
+      await new Promise(resolve=>setTimeout(resolve,2000));
+    }
+    throw new Error('Local generation deadline exceeded.');
+  } finally {activeLocalJob=null;notify('');}
+}
 export const api = {
+  companionDevices: () => request<CompanionDevice[]>('/api/companion/devices'),
+  pairCompanion: () => request<{code:string;expiresAt:number}>('/api/companion/devices/pairing',{method:'POST'}),
+  revokeCompanion: (id:string) => request(`/api/companion/devices/${id}`,{method:'DELETE'}),
+  cancelCompanionJob: (id:string) => request(`/api/companion/requests/${id}`,{method:'DELETE'}),
+  cancelLocalGeneration: () => activeLocalJob ? request(`/api/companion/requests/${activeLocalJob}`,{method:'DELETE'}) : Promise.resolve(),
   session: async () => {
     const session = await request<Session>('/api/auth/session');
     csrf = session.csrf;
@@ -81,9 +106,9 @@ export const api = {
       body: JSON.stringify({ mediaId, youtubeFormat }),
     }),
   generateHashtags: (title: string, caption: string) =>
-    request<{ hashtags: string; provider: string; model: string }>('/api/ai/hashtags', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title, caption }) }),
+    textRequest<{ hashtags: string; provider: string; model: string }>('/api/ai/hashtags', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title, caption }) }),
   generateThumbnailCopy: (title: string, caption: string, feedback?: string) =>
-    request<{ thumbnailText: string; provider: string; model: string }>('/api/ai/thumbnail-copy', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title, caption, feedback }) }),
+    textRequest<{ thumbnailText: string; provider: string; model: string }>('/api/ai/thumbnail-copy', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title, caption, feedback }) }),
   generateThumbnail: (title: string, caption: string, orientation: 'horizontal' | 'vertical', referenceMediaId?: string, thumbnailText?: string, referenceMode: 'preserve' | 'style' = 'style', preserveReferenceBranding = false, imageIdeas?: string, regenerationFeedback?: string) =>
     request<MediaAsset & { provider: string; model: string; thumbnailText: string; orientation: string }>('/api/ai/thumbnail', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title, caption, orientation, referenceMediaId, thumbnailText, referenceMode, preserveReferenceBranding, imageIdeas, regenerationFeedback }) }),
   media: () => request<MediaAsset[]>('/api/media'),

@@ -6,6 +6,7 @@ The current application uses **React + a Hono Worker + D1 + private R2 + Cloudfl
 
 - [Step-by-step GitHub Actions deployment](docs/cloudflare-deployment.md)
 - [Architecture and reliability](docs/architecture.md)
+- [Optional Codex / Antigravity local companion](docs/local-companion.md)
 - [Import existing local data](docs/local-data-migration.md)
 
 ```bash

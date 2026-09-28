@@ -7,7 +7,9 @@
     "apps/web",
     "apps/api",
     "apps/worker",
-    "packages/shared"
+    "packages/shared",
+    "apps/companion",
+    "apps/companion-desktop"
   ],
   "scripts": {
     "setup": "node scripts/setup-worker.mjs",
@@ -16,11 +18,14 @@
     "dev:legacy": "concurrently \"npm run dev -w apps/api\" \"npm run dev -w apps/web\"",
     "build": "npm run build -w apps/web && wrangler deploy --dry-run --outdir .worker-build",
     "typecheck": "npm run typecheck -w apps/worker && npm run typecheck -w apps/web",
-    "test": "vitest run && node --test scripts/cloudflare/*.test.mjs",
+    "test": "vitest run && node --test scripts/cloudflare/*.test.mjs && npm test -w apps/companion",
     "db:migrate": "wrangler d1 migrations apply DB --local",
     "deploy:prepare": "node scripts/cloudflare/provision.mjs",
     "deploy": "node scripts/cloudflare/deploy.mjs",
-    "start": "wrangler dev"
+    "start": "wrangler dev",
+    "companion": "node apps/companion/index.mjs",
+    "companion:desktop": "npm run dev -w apps/companion-desktop --",
+    "companion:build": "npm run build -w apps/companion-desktop --"
   },
   "devDependencies": {
     "@aws-sdk/client-s3": "^3.1138.0",

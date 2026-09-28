@@ -1,7 +1,7 @@
 import { CalendarClock, Check, CloudUpload, Facebook, Instagram, LoaderCircle, Play, Save, Send, Sparkles, UploadCloud, Youtube } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { api } from '../lib/api';
+import { localGeneration, api } from '../lib/api';
 import { prepareReferenceImage } from '../lib/referenceImage';
 import { shortsEligibility, type VideoMetadata } from '@postpilot/shared';
 import type { AccountsResponse, MediaAsset, Platform } from '../lib/types';
@@ -20,6 +20,12 @@ export function CreatePost() {
   const [localPreview, setLocalPreview] = useState('');
   const [title, setTitle] = useState('');
   const [caption, setCaption] = useState('');
+  const [localStatus, setLocalStatus] = useState('');
+  useEffect(() => {
+    const update = (event: Event) => setLocalStatus((event as CustomEvent<string>).detail);
+    localGeneration.addEventListener('status', update);
+    return () => localGeneration.removeEventListener('status', update);
+  }, []);
   const [hashtags, setHashtags] = useState('');
   const [thumbnail, setThumbnail] = useState<MediaAsset | null>(null);
   const [referenceImage, setReferenceImage] = useState<MediaAsset | null>(null);
@@ -153,6 +159,7 @@ export function CreatePost() {
   return (
     <div className="project-editor">
       <div className="page-heading"><div><span className="eyebrow">{postId ? 'RESUME' : 'CREATE'}</span><h1>{postId ? 'Edit Project' : asset ? 'Create from Library' : 'Upload Video'}</h1><p>{postId ? 'Continue editing this saved project.' : 'Create once, then publish the same media across your connected channels.'}</p></div><button className="btn secondary" onClick={() => void submit('draft')} disabled={!!busy || loadingProject}><Save size={17} /> {postId ? 'Save Changes' : 'Save Draft'}</button></div>
+      {localStatus && <div className="alert" role="status">{localStatus} <button className="btn secondary" onClick={() => void api.cancelLocalGeneration().catch(e => setError(e.message))}>Cancel generation</button></div>}
       {error && <div className="alert danger">{error}</div>}
       {metaSelected && accounts && !accounts.readiness.publicMediaUrlConfigured && <div className="alert warning"><strong>Meta needs a public media URL.</strong> Use the deployed HTTPS studio to publish to Instagram or Facebook.</div>}
       <div className="composer-grid">
@@ -189,9 +196,9 @@ export function CreatePost() {
             </div>}
           </section>
           <div className="form-grid">
-            <label className="field full"><span>Title</span><input className="input" value={title} maxLength={100} onChange={(e) => setTitle(e.target.value)} placeholder="Exploring Japan — A Visual Journey" /><small>{title.length}/100</small></label>
-            <label className="field full"><span>Caption / description</span><textarea className="textarea" value={caption} maxLength={5000} onChange={(e) => setCaption(e.target.value)} placeholder="Tell your audience what this video is about…" /><small>{caption.length}/5000</small></label>
-            {selected.includes('instagram') && <label className="field full"><span>Instagram hashtags</span><textarea className="textarea compact" value={hashtags} maxLength={1000} onChange={(e) => setHashtags(e.target.value)} placeholder="#reels #video #creator" /><small>{hashtags.length}/1000</small></label>}
+            <label className="field full"><span>Title</span><input className="input" disabled={!!busy} value={title} maxLength={100} onChange={(e) => setTitle(e.target.value)} placeholder="Exploring Japan — A Visual Journey" /><small>{title.length}/100</small></label>
+            <label className="field full"><span>Caption / description</span><textarea className="textarea" disabled={!!busy} value={caption} maxLength={5000} onChange={(e) => setCaption(e.target.value)} placeholder="Tell your audience what this video is about…" /><small>{caption.length}/5000</small></label>
+            {selected.includes('instagram') && <label className="field full"><span>Instagram hashtags</span><textarea className="textarea compact" disabled={!!busy} value={hashtags} maxLength={1000} onChange={(e) => setHashtags(e.target.value)} placeholder="#reels #video #creator" /><small>{hashtags.length}/1000</small></label>}
           </div>
           {selected.includes('instagram') && <div className="social-ai-row">
             <button className="btn secondary" disabled={!!busy || !title.trim()} onClick={() => void generateHashtags()}><Sparkles size={16}/> Generate hashtags</button>

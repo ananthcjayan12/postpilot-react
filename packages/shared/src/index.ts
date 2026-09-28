@@ -1,3 +1,4 @@
+export * from './companion';
 import { z } from 'zod';
 export const platformSchema = z.enum(['youtube', 'instagram', 'facebook']);
 export type Platform = z.infer<typeof platformSchema>;
@@ -54,8 +55,8 @@ export const settingsInput = z.object({
   openaiApiKey: z.string().trim().min(10).max(500).nullable().optional(),
   aiRoutes: z.object({
     metadata: z.enum(['gemini:gemini-3.8-flash', 'gemini:gemini-2.5-flash']),
-    hashtags: z.enum(['gemini:gemini-3.8-flash', 'gemini:gemini-2.5-flash', 'openai:gpt-5-mini', 'openai:gpt-4.1-mini']),
-    thumbnailCopy: z.enum(['gemini:gemini-3.8-flash', 'gemini:gemini-2.5-flash', 'openai:gpt-5-mini', 'openai:gpt-4.1-mini']),
+    hashtags: z.enum(['gemini:gemini-3.8-flash', 'gemini:gemini-2.5-flash', 'openai:gpt-5-mini', 'openai:gpt-4.1-mini', 'codex:local', 'antigravity:local']),
+    thumbnailCopy: z.enum(['gemini:gemini-3.8-flash', 'gemini:gemini-2.5-flash', 'openai:gpt-5-mini', 'openai:gpt-4.1-mini', 'codex:local', 'antigravity:local']),
     thumbnail: thumbnailModelSchema,
     thumbnailResolution: z.enum(['1K', '2K', '4K']),
   }).default({

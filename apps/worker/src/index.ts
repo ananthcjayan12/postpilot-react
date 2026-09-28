@@ -7,6 +7,7 @@ import { auth, requireSession } from './auth';
 import { oauth } from './oauth';
 import { media, mediaResponse, cleanupUploads } from './media';
 import { api, dispatch } from './posts';
+import { companion, expireJobs } from './companion';
 import { gemini } from './gemini';
 export { PublishPost } from './publish';
 export const app = new Hono<AppEnv>();
@@ -28,6 +29,7 @@ app.route('/api/auth', auth);
 app.route('/api/oauth', oauth);
 app.route('/api/media', media);
 app.route('/api/ai', gemini);
+app.route('/api/companion', companion);
 app.route('/api', api);
 app.on(['GET', 'HEAD'], '/media-files/:id', requireSession, (c) =>
   mediaResponse(c.req.raw, c.env, c.req.param('id')!, c.get('user').id),
@@ -50,6 +52,8 @@ export default {
       (async () => {
         await dispatch(env);
         await cleanupUploads(env);
+        await expireJobs(env);
+        await env.DB.prepare("DELETE FROM companion_jobs WHERE expires_at<?").bind(Date.now()-7*86400000).run();
         await env.DB.batch([
           env.DB.prepare('DELETE FROM sessions WHERE expires_at<?').bind(Date.now()),
           env.DB.prepare('DELETE FROM oauth_states WHERE expires_at<?').bind(Date.now()),

@@ -27,6 +27,9 @@ beforeAll(async () => {
 });
 beforeEach(async () => {
   for (const table of [
+    'companion_jobs',
+    'companion_pairs',
+    'companion_devices',
     'attempts',
     'runs',
     'targets',
@@ -592,5 +595,69 @@ describe('durable publishing boundaries', () => {
     expect(confirmedOffset(null)).toBe(0);
     expect(confirmedOffset('bytes=0-8388607')).toBe(8388608);
     expect(() => confirmedOffset('bytes=oops')).toThrow();
+  });
+});
+
+describe('local companion', () => {
+  const caps={codex:{installed:true,ready:true,version:'test',detail:'Ready'},antigravity:{installed:false,ready:false,version:'',detail:'Missing'}};
+  async function paired() {
+    const pair=await (await call('/api/companion/devices/pairing','POST')).json() as any;
+    const response=await call('/api/companion/pair','POST',{code:pair.code,name:'Test PC'},false);
+    expect(response.status).toBe(200);
+    const d=await response.json() as any;
+    const headers={Authorization:`Bearer ${d.token}`};
+    await call('/api/companion/poll','POST',caps,false,headers);
+    return {...d,headers,code:pair.code};
+  }
+  async function enqueue() {
+    await call('/api/settings','PUT',{...defaultSettings,aiRoutes:{...defaultSettings.aiRoutes,hashtags:'codex:local',thumbnailCopy:'codex:local'}});
+    const key=crypto.randomUUID();
+    const response=await call('/api/ai/hashtags','POST',{title:'Kerala',caption:'Travel' },true,{'Idempotency-Key':key});
+    expect(response.status).toBe(202);
+    return {...await response.json() as any,key};
+  }
+  it('pairs once, queues idempotently, claims once and validates completion',async()=>{
+    const d=await paired();
+    expect((await call('/api/companion/pair','POST',{code:d.code,name:'Other'},false)).status).toBe(400);
+    const q=await enqueue();
+    const again=await (await call('/api/ai/hashtags','POST',{title:'Kerala'},true,{'Idempotency-Key':q.key})).json() as any;
+    expect(again.jobId).toBe(q.jobId);
+    const {job}=await (await call('/api/companion/poll','POST',caps,false,d.headers)).json() as any;
+    expect(job.id).toBe(q.jobId);
+    expect((await (await call('/api/companion/poll','POST',caps,false,d.headers)).json() as any).job).toBeNull();
+    expect((await call(`/api/companion/jobs/${job.id}/complete`,'POST',{lease:job.lease,result:{hashtags:'not hashtags'}},false,d.headers)).status).toBe(400);
+    const complete={lease:job.lease,result:{hashtags:'#Kerala #Travel'}};
+    expect((await call(`/api/companion/jobs/${job.id}/complete`,'POST',complete,false,d.headers)).status).toBe(200);
+    expect((await call(`/api/companion/jobs/${job.id}/complete`,'POST',complete,false,d.headers)).status).toBe(200);
+    const saved=await (await call(`/api/companion/requests/${job.id}`)).json() as any;
+    expect(saved.status).toBe('succeeded');expect(saved.result.hashtags).toBe('#Kerala #Travel');
+  });
+  it('rejects offline providers and protects pairing with session/CSRF',async()=>{
+    expect((await call('/api/companion/devices/pairing','POST',undefined,false)).status).toBe(401);
+    expect((await call('/api/companion/devices/pairing','POST',undefined,true,{'X-CSRF-Token':'wrong'})).status).toBe(403);
+    await call('/api/settings','PUT',{...defaultSettings,aiRoutes:{...defaultSettings.aiRoutes,hashtags:'codex:local'}});
+    expect((await call('/api/ai/hashtags','POST',{title:'Test'},true,{'Idempotency-Key':crypto.randomUUID()})).status).toBe(409);
+  });
+  it('enforces cancellation, device revocation and lease expiry',async()=>{
+    const d=await paired(), q=await enqueue();
+    const {job}=await (await call('/api/companion/poll','POST',caps,false,d.headers)).json() as any;
+    await call(`/api/companion/requests/${q.jobId}`,'DELETE');
+    expect((await (await call(`/api/companion/jobs/${job.id}/heartbeat`,'POST',{lease:job.lease},false,d.headers)).json() as any).active).toBe(false);
+    expect((await call(`/api/companion/jobs/${job.id}/complete`,'POST',{lease:job.lease,result:{hashtags:'#Test'}},false,d.headers)).status).toBe(409);
+    const q2=await enqueue();
+    const {job:j2}=await (await call('/api/companion/poll','POST',caps,false,d.headers)).json() as any;
+    await e.DB.prepare('UPDATE companion_jobs SET lease_until=0 WHERE id=?').bind(j2.id).run();
+    expect((await (await call(`/api/companion/requests/${q2.jobId}`)).json() as any).status).toBe('expired');
+    await call(`/api/companion/devices/${d.id}`,'DELETE');
+    expect((await call('/api/companion/poll','POST',caps,false,d.headers)).status).toBe(401);
+  });
+  it('denies other devices and other users access to a job',async()=>{
+    const d=await paired(),q=await enqueue();
+    const {job}=await (await call('/api/companion/poll','POST',caps,false,d.headers)).json() as any;
+    const other=await paired();
+    expect((await call(`/api/companion/jobs/${job.id}/complete`,'POST',{lease:job.lease,result:{hashtags:'#Test'}},false,other.headers)).status).toBe(404);
+    await e.DB.prepare('INSERT INTO users VALUES(?,?,?,?)').bind('other-user','owner@example.com','Other',now()).run();
+    await e.DB.prepare('INSERT INTO sessions VALUES(?,?,?,?)').bind(await hash('other-token'),'other-user',csrf,Date.now()+60000).run();
+    expect((await call(`/api/companion/requests/${q.jobId}`,'GET',undefined,true,{Cookie:'pp_session=other-token'})).status).toBe(404);
   });
 });
