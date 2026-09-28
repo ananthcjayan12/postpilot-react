@@ -41,7 +41,7 @@ Bundles are written to `src-tauri/target/release/bundle`. macOS and Windows inst
 
 ## GitHub releases
 
-`.github/workflows/companion-release.yml` tests and builds all three architectures. Pull requests and **Run workflow** produce downloadable Actions artifacts without publishing a release. Tags matching `companion-v*` publish a GitHub Release only after all matrix jobs succeed. Each installer includes a SHA-256 checksum file. A public repository is required for unauthenticated downloads; private releases need repository access.
+`.github/workflows/companion-release.yml` tests and builds all three architectures. Pull requests and **Run workflow** produce downloadable Actions artifacts with ad-hoc macOS signing, without publishing a release. Apple certificate and notarization secrets are used only for `companion-v*` tag builds. Tags matching `companion-v*` publish a GitHub Release only after all matrix jobs succeed. Each installer includes a SHA-256 checksum file. A public repository is required for unauthenticated downloads; private releases need repository access.
 
 For version 0.1.0:
 

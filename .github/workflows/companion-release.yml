@@ -77,17 +77,43 @@ jobs:
       - name: Configure installer signing
         run: node apps/companion-desktop/scripts/release-config.mjs
         env:
-          APPLE_SIGNING_IDENTITY: ${{ github.event_name != 'pull_request' && secrets.APPLE_SIGNING_IDENTITY || '' }}
-      - name: Build installer
+          APPLE_SIGNING_IDENTITY: ${{ startsWith(github.ref, 'refs/tags/companion-v') && secrets.APPLE_SIGNING_IDENTITY || '' }}
+      - name: Check optional Apple signing credentials
+        id: apple_signing
+        if: runner.os == 'macOS' && startsWith(github.ref, 'refs/tags/companion-v')
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        run: |
+          if [[ -z "$APPLE_CERTIFICATE" && -z "$APPLE_CERTIFICATE_PASSWORD" && -z "$APPLE_SIGNING_IDENTITY" ]]; then
+            echo 'enabled=false' >> "$GITHUB_OUTPUT"
+          elif [[ -n "$APPLE_CERTIFICATE" && -n "$APPLE_CERTIFICATE_PASSWORD" && -n "$APPLE_SIGNING_IDENTITY" ]]; then
+            echo 'enabled=true' >> "$GITHUB_OUTPUT"
+          else
+            echo '::error::Set all three Apple signing secrets, or leave all three unset for an ad-hoc signed build.'
+            exit 1
+          fi
+      - name: Build installer without Apple certificate
+        if: steps.apple_signing.outputs.enabled != 'true'
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          APPLE_CERTIFICATE: ${{ github.event_name != 'pull_request' && secrets.APPLE_CERTIFICATE || '' }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ github.event_name != 'pull_request' && secrets.APPLE_CERTIFICATE_PASSWORD || '' }}
-          APPLE_SIGNING_IDENTITY: ${{ github.event_name != 'pull_request' && secrets.APPLE_SIGNING_IDENTITY || '-' }}
-          APPLE_ID: ${{ github.event_name != 'pull_request' && secrets.APPLE_ID || '' }}
-          APPLE_PASSWORD: ${{ github.event_name != 'pull_request' && secrets.APPLE_PASSWORD || '' }}
-          APPLE_TEAM_ID: ${{ github.event_name != 'pull_request' && secrets.APPLE_TEAM_ID || '' }}
+        with:
+          projectPath: apps/companion-desktop
+          args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} --config src-tauri/release.config.json -- --locked
+      - name: Build installer for release
+        if: steps.apple_signing.outputs.enabled == 'true'
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
           projectPath: apps/companion-desktop
           args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} --config src-tauri/release.config.json -- --locked
