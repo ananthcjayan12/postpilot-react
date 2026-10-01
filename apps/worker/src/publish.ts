@@ -77,7 +77,7 @@ export async function providerReason(response: Response) {
     return '';
   }
 }
-export const YOUTUBE_CHUNK_BYTES = 16 * 1024 ** 2; // must be a multiple of 256 KiB
+export const YOUTUBE_CHUNK_BYTES = 8 * 1024 ** 2; // must be a multiple of 256 KiB
 const YOUTUBE_MAX_SESSION_RESTARTS = 3;
 /** Waits between resume rounds when a chunk still fails after the step's own retries. */
 export const YOUTUBE_RESUME_DELAYS = ['1 minute', '2 minutes', '5 minutes', '10 minutes', '15 minutes', '30 minutes', '30 minutes', '1 hour'] as const;
