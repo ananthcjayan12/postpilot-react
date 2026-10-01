@@ -12,7 +12,7 @@ import { uploadVideo } from '../src/gemini';
 import { hash, seal, unseal, signMedia, validMediaSignature, now, saveCredential } from '../src/lib';
 import { ownerAllowed } from '../src/auth';
 import { dispatch } from '../src/posts';
-import { confirmedOffset, youtubeChunk, publishFacebook, publishInstagram, createInstagram } from '../src/publish';
+import { confirmedOffset, youtubeChunk, publishFacebook, publishInstagram, createInstagram, isSubrequestLimit, YOUTUBE_CHUNK_BYTES } from '../src/publish';
 import type { Env, PostRow, MediaRow } from '../src/env';
 const e = env as unknown as Env & { TEST_MIGRATIONS: any };
 const token = 'test-owner-session',
@@ -748,6 +748,14 @@ describe('durable publishing boundaries', () => {
       await inspect.dispose();
     }
   }, 20000);
+  it('recognizes Cloudflare subrequest exhaustion so it is never retried in the same run', () => {
+    expect(isSubrequestLimit(new Error('Too many subrequests by single Worker invocation. To configure this limit, refer to x'))).toBe(true);
+    expect(isSubrequestLimit(new Error('Cloudflare subrequest limit reached for this run'))).toBe(true);
+    expect(isSubrequestLimit(new Error('Provider rejected request (403)'))).toBe(false);
+    // 2 external subrequests per chunk: even a 1 GiB video must fit Workers Free's 50-per-run budget.
+    expect(YOUTUBE_CHUNK_BYTES % (256 * 1024)).toBe(0);
+    expect(Math.ceil((1024 * 1024 ** 2) / YOUTUBE_CHUNK_BYTES) * 2 + 4).toBeLessThan(50);
+  });
   it('parses confirmed offsets rather than trusting local progress', () => {
     expect(confirmedOffset(null)).toBe(0);
     expect(confirmedOffset('bytes=0-8388607')).toBe(8388608);

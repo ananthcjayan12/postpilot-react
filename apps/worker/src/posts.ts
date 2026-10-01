@@ -424,7 +424,7 @@ export async function resumeInterruptedYouTube(env: Env) {
       `SELECT p.id FROM posts p JOIN targets t ON t.post_id=p.id AND t.platform='youtube'
        WHERE p.status IN ('failed','partial') AND p.attempts<? AND p.updated_at<=?
          AND t.status='failed' AND json_extract(t.data,'$.autoResume')=1
-         AND NOT EXISTS(SELECT 1 FROM targets o WHERE o.post_id=p.id AND o.platform!='youtube' AND o.status!='success')
+         AND NOT EXISTS(SELECT 1 FROM targets o WHERE o.post_id=p.id AND o.platform!='youtube' AND o.status NOT IN ('success','pending'))
          AND NOT EXISTS(SELECT 1 FROM runs r WHERE r.post_id=p.id AND r.status IN ('pending','dispatched'))
        ORDER BY p.updated_at LIMIT 10`,
     )
