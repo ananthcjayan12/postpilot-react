@@ -215,7 +215,10 @@ api.post('/posts/:id/:action', async (c) => {
     .bind(id, user)
     .first<PostRow>();
   if (!post) throw new AppError('Post not found.', 404);
-  const uncertain = await c.env.DB.prepare("SELECT platform FROM targets WHERE post_id=? AND status='review'")
+  // YouTube uploads resume their own session, so a YouTube review never blocks a retry.
+  const uncertain = await c.env.DB.prepare(
+    "SELECT platform FROM targets WHERE post_id=? AND status='review' AND platform!='youtube'",
+  )
     .bind(id)
     .first();
   if (uncertain)
@@ -233,7 +236,7 @@ api.post('/posts/:id/:action', async (c) => {
         "UPDATE posts SET status='publishing',last_error=NULL,attempts=attempts+1,updated_at=? WHERE id=? AND EXISTS(SELECT 1 FROM runs WHERE id=?)",
       ).bind(now(), id, runId),
       c.env.DB.prepare(
-        "UPDATE targets SET status='pending',error=NULL,data=CASE WHEN platform='instagram' THEN '{}' ELSE data END WHERE post_id=? AND status='failed' AND EXISTS(SELECT 1 FROM runs WHERE id=?)",
+        "UPDATE targets SET status='pending',error=NULL,data=CASE WHEN platform='instagram' THEN '{}' ELSE data END WHERE post_id=? AND (status='failed' OR (platform='youtube' AND status='review')) AND EXISTS(SELECT 1 FROM runs WHERE id=?)",
       ).bind(id, runId),
     ]);
     c.executionCtx.waitUntil(dispatch(c.env));
@@ -408,6 +411,41 @@ api.put('/settings', async (c) => {
     .run();
   return c.json({ ...preferences, geminiConfigured: geminiApiKey ? true : !!(await getCredential(c.env, c.get('user').id, 'gemini')), openaiConfigured: openaiApiKey ? true : !!(await getCredential(c.env, c.get('user').id, 'openai')) });
 });
+export const AUTO_RESUME_MAX_ATTEMPTS = 6;
+export const AUTO_RESUME_COOLDOWN_MS = 5 * 60 * 1000;
+/**
+ * Re-queues posts whose only unfinished target is a YouTube upload that stopped for a
+ * transient reason. The new run resumes the same resumable session, so this cannot duplicate.
+ */
+export async function resumeInterruptedYouTube(env: Env) {
+  const cutoff = new Date(Date.now() - AUTO_RESUME_COOLDOWN_MS).toISOString();
+  const candidates = (
+    await env.DB.prepare(
+      `SELECT p.id FROM posts p JOIN targets t ON t.post_id=p.id AND t.platform='youtube'
+       WHERE p.status IN ('failed','partial') AND p.attempts<? AND p.updated_at<=?
+         AND t.status='failed' AND json_extract(t.data,'$.autoResume')=1
+         AND NOT EXISTS(SELECT 1 FROM targets o WHERE o.post_id=p.id AND o.platform!='youtube' AND o.status NOT IN ('success','pending'))
+         AND NOT EXISTS(SELECT 1 FROM runs r WHERE r.post_id=p.id AND r.status IN ('pending','dispatched'))
+       ORDER BY p.updated_at LIMIT 10`,
+    )
+      .bind(AUTO_RESUME_MAX_ATTEMPTS, cutoff)
+      .all<{ id: string }>()
+  ).results;
+  for (const p of candidates) {
+    const runId = crypto.randomUUID();
+    await env.DB.batch([
+      env.DB.prepare(
+        "INSERT INTO runs(id,post_id,created_at) SELECT ?,id,? FROM posts WHERE id=? AND status IN ('failed','partial') AND NOT EXISTS(SELECT 1 FROM runs WHERE post_id=? AND status IN ('pending','dispatched'))",
+      ).bind(runId, now(), p.id, p.id),
+      env.DB.prepare(
+        "UPDATE posts SET status='publishing',last_error=NULL,attempts=attempts+1,updated_at=? WHERE id=? AND EXISTS(SELECT 1 FROM runs WHERE id=?)",
+      ).bind(now(), p.id, runId),
+      env.DB.prepare(
+        "UPDATE targets SET status='pending',error=NULL WHERE post_id=? AND platform='youtube' AND status='failed' AND EXISTS(SELECT 1 FROM runs WHERE id=?)",
+      ).bind(p.id, runId),
+    ]);
+  }
+}
 export async function dispatch(env: Env) {
   const due = (
     await env.DB.prepare(
@@ -427,6 +465,7 @@ export async function dispatch(env: Env) {
       ).bind(now(), p.id, runId),
     ]);
   }
+  await resumeInterruptedYouTube(env);
   const pending = (
     await env.DB.prepare("SELECT id FROM runs WHERE status='pending' ORDER BY created_at LIMIT 20").all<{
       id: string;
@@ -456,6 +495,10 @@ export async function dispatch(env: Env) {
       const state = await instance.status();
       if (['errored', 'terminated'].includes(state.status))
         await env.DB.batch([
+          // An interrupted YouTube upload is safely resumable; mark it for automatic resume.
+          env.DB.prepare(
+            "UPDATE targets SET status='failed',error='YouTube upload interrupted; it will resume from the last confirmed byte.',data=json_set(data,'$.autoResume',json('true')) WHERE post_id=? AND platform='youtube' AND status NOT IN ('success','failed','review')",
+          ).bind(r.post_id),
           env.DB.prepare(
             "UPDATE targets SET status='review',error='Publishing execution stopped; verify remote results before retrying.' WHERE post_id=? AND status NOT IN ('success','failed','review')",
           ).bind(r.post_id),

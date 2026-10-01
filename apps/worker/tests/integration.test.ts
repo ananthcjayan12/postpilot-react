@@ -12,7 +12,7 @@ import { uploadVideo } from '../src/gemini';
 import { hash, seal, unseal, signMedia, validMediaSignature, now, saveCredential } from '../src/lib';
 import { ownerAllowed } from '../src/auth';
 import { dispatch } from '../src/posts';
-import { confirmedOffset, youtubeChunk, publishFacebook, publishInstagram, createInstagram } from '../src/publish';
+import { confirmedOffset, youtubeChunk, publishFacebook, publishInstagram, createInstagram, isSubrequestLimit, YOUTUBE_CHUNK_BYTES } from '../src/publish';
 import type { Env, PostRow, MediaRow } from '../src/env';
 const e = env as unknown as Env & { TEST_MIGRATIONS: any };
 const token = 'test-owner-session',
@@ -589,6 +589,96 @@ describe('durable publishing boundaries', () => {
     expect(JSON.parse(row.data).url).toBe('https://www.youtube.com/shorts/video123');
     expect(await youtubeChunk(e, post, media)).toBe(true);
   });
+  it('starts a fresh YouTube session when the old one expired instead of needing review', async () => {
+    const { post, media } = await seed();
+    await saveCredential(e, user, 'google', { accessToken: 'test', expiryDate: Date.now() + 3600000 });
+    await e.DB.prepare("UPDATE targets SET status='uploading',data=? WHERE post_id=?")
+      .bind(
+        JSON.stringify({
+          youtubeFormat: 'short',
+          session: await seal(e, 'https://www.googleapis.com/upload/expired', `${post.id}:youtube-session`),
+        }),
+        post.id,
+      )
+      .run();
+    mockProvider('https://www.googleapis.com/upload/expired', { error: { message: 'gone' } }, 'PUT', 404);
+    expect(await youtubeChunk(e, post, media)).toBe(false);
+    const row: any = await e.DB.prepare('SELECT * FROM targets WHERE post_id=?').bind(post.id).first();
+    expect(row.status).toBe('uploading');
+    expect(JSON.parse(row.data)).toEqual({ youtubeFormat: 'short', restarts: 1 });
+  });
+  it('surfaces the provider reason when YouTube rejects a chunk', async () => {
+    const { post, media } = await seed();
+    await saveCredential(e, user, 'google', { accessToken: 'test', expiryDate: Date.now() + 3600000 });
+    await e.DB.prepare("UPDATE targets SET status='uploading',data=? WHERE post_id=?")
+      .bind(
+        JSON.stringify({ session: await seal(e, 'https://www.googleapis.com/upload/quota', `${post.id}:youtube-session`) }),
+        post.id,
+      )
+      .run();
+    mockProvider(
+      'https://www.googleapis.com/upload/quota',
+      { error: { message: 'Daily upload limit reached.', errors: [{ reason: 'uploadLimitExceeded' }] } },
+      'PUT',
+      403,
+    );
+    await expect(youtubeChunk(e, post, media)).rejects.toThrow('uploadLimitExceeded - Daily upload limit reached.');
+  });
+  it('lets Retry resume a YouTube upload that was marked for review, keeping its session', async () => {
+    const { post } = await seed('youtube');
+    await e.DB.prepare("UPDATE targets SET status='review',data=? WHERE post_id=?")
+      .bind(JSON.stringify({ session: 'sealed-session', youtubeFormat: 'video' }), post.id)
+      .run();
+    await e.DB.prepare("UPDATE posts SET status='failed' WHERE id=?").bind(post.id).run();
+    const createBatch = vi.fn(async () => []);
+    const ctx = createExecutionContext();
+    const response = await app.fetch(
+      new Request(`${e.APP_ORIGIN}/api/posts/${post.id}/retry`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Origin: e.APP_ORIGIN, Cookie: `pp_session=${token}`, 'X-CSRF-Token': csrf },
+      }),
+      { ...e, PUBLISH: { createBatch, get: async () => ({ status: async () => ({ status: 'running' }) }) } } as unknown as Env,
+      ctx,
+    );
+    await waitOnExecutionContext(ctx);
+    expect(response.status).toBe(200);
+    const row: any = await e.DB.prepare('SELECT * FROM targets WHERE post_id=?').bind(post.id).first();
+    expect(row.status).toBe('pending');
+    expect(JSON.parse(row.data).session).toBe('sealed-session');
+  });
+  it('automatically resumes a YouTube upload interrupted by a stopped workflow', async () => {
+    const { post } = await seed('youtube');
+    await e.DB.prepare("UPDATE targets SET status='uploading',data=? WHERE post_id=?")
+      .bind(JSON.stringify({ session: 'sealed-session' }), post.id)
+      .run();
+    await e.DB.prepare("UPDATE posts SET status='publishing',attempts=1 WHERE id=?").bind(post.id).run();
+    const runId = crypto.randomUUID();
+    await e.DB.prepare("INSERT INTO runs(id,post_id,status,created_at,dispatched_at) VALUES(?,?,'dispatched',?,?)")
+      .bind(runId, post.id, now(), now())
+      .run();
+    const createBatch = vi.fn(async () => []);
+    const fake = {
+      ...e,
+      PUBLISH: {
+        createBatch,
+        get: async (id: string) => ({ status: async () => ({ status: id === runId ? 'errored' : 'running' }) }),
+      },
+    } as unknown as Env;
+    await dispatch(fake);
+    let row: any = await e.DB.prepare('SELECT * FROM targets WHERE post_id=?').bind(post.id).first();
+    expect(row.status).toBe('failed');
+    expect(JSON.parse(row.data)).toEqual({ session: 'sealed-session', autoResume: true });
+    // Past the cooldown, the next cron tick re-queues it without any manual review.
+    await e.DB.prepare('UPDATE posts SET updated_at=? WHERE id=?')
+      .bind(new Date(Date.now() - 10 * 60 * 1000).toISOString(), post.id)
+      .run();
+    await dispatch(fake);
+    row = await e.DB.prepare('SELECT * FROM targets WHERE post_id=?').bind(post.id).first();
+    expect(row.status).toBe('pending');
+    expect(JSON.parse(row.data).session).toBe('sealed-session');
+    expect((await e.DB.prepare('SELECT status FROM posts WHERE id=?').bind(post.id).first<any>()).status).toBe('publishing');
+    expect(createBatch).toHaveBeenCalledTimes(1);
+  });
   it('uploads the chosen image as a YouTube video thumbnail', async () => {
     const { post, media } = await seed();
     const thumbnail = crypto.randomUUID();
@@ -658,6 +748,14 @@ describe('durable publishing boundaries', () => {
       await inspect.dispose();
     }
   }, 20000);
+  it('recognizes Cloudflare subrequest exhaustion so it is never retried in the same run', () => {
+    expect(isSubrequestLimit(new Error('Too many subrequests by single Worker invocation. To configure this limit, refer to x'))).toBe(true);
+    expect(isSubrequestLimit(new Error('Cloudflare subrequest limit reached for this run'))).toBe(true);
+    expect(isSubrequestLimit(new Error('Provider rejected request (403)'))).toBe(false);
+    // 2 external subrequests per chunk: even a 1 GiB video must fit Workers Free's 50-per-run budget.
+    expect(YOUTUBE_CHUNK_BYTES % (256 * 1024)).toBe(0);
+    expect(Math.ceil((1024 * 1024 ** 2) / YOUTUBE_CHUNK_BYTES) * 2 + 4).toBeLessThan(50);
+  });
   it('parses confirmed offsets rather than trusting local progress', () => {
     expect(confirmedOffset(null)).toBe(0);
     expect(confirmedOffset('bytes=0-8388607')).toBe(8388608);
