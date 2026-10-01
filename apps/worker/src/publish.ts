@@ -52,11 +52,38 @@ async function checked(response: Response) {
       `Provider temporarily unavailable; retry after ${Number.isFinite(delay) ? Math.max(10000, delay) : 10000} milliseconds.`,
     );
   }
-  if (!response.ok)
+  if (!response.ok) {
+    const reason = await providerReason(response);
     throw new NonRetryableError(
-      `Provider rejected request (${response.status}); check authorization, format and quota.`,
+      `Provider rejected request (${response.status}${reason ? `: ${reason}` : ''}); check authorization, format and quota.`,
     );
+  }
   return response.json() as Promise<any>;
+}
+/** Extracts a short, human-readable reason from a Google or Meta error body. */
+export async function providerReason(response: Response) {
+  try {
+    const body: any = JSON.parse(await response.text());
+    const e = body?.error;
+    const reason = e?.errors?.[0]?.reason || e?.status || e?.type || '';
+    const message = typeof e === 'string' ? e : e?.message || e?.error_user_msg || '';
+    return [reason, message]
+      .filter(Boolean)
+      .join(' - ')
+      .replace(/https?:\/\/\S+/g, '[url]')
+      .replace(/[A-Za-z0-9_\-]{40,}/g, '[redacted]')
+      .slice(0, 200);
+  } catch {
+    return '';
+  }
+}
+export const YOUTUBE_CHUNK_BYTES = 16 * 1024 ** 2; // must be a multiple of 256 KiB
+const YOUTUBE_MAX_SESSION_RESTARTS = 3;
+/** Waits between resume rounds when a chunk still fails after the step's own retries. */
+export const YOUTUBE_RESUME_DELAYS = ['1 minute', '2 minutes', '5 minutes', '10 minutes', '15 minutes', '30 minutes', '30 minutes', '1 hour'] as const;
+export function isTerminal(error: unknown) {
+  const e = error as { name?: string } | undefined;
+  return error instanceof NonRetryableError || error instanceof AppError || e?.name === 'NonRetryableError';
 }
 async function readFacebook(env: Env, path: string, token: string) {
   return checked(
@@ -180,12 +207,22 @@ export async function youtubeChunk(env: Env, post: PostRow, media: MediaRow) {
     if (!result.id) throw new ReviewError('Upload completed without a retrievable video ID.');
     return finish(result.id);
   }
-  if ([404, 410].includes(probe.status))
-    throw new ReviewError('YouTube upload session expired. Verify the channel before retrying.');
+  if ([404, 410].includes(probe.status)) {
+    // An expired or unknown session never completed (completed sessions answer 200/201),
+    // so YouTube only holds an unfinished draft. Starting a new session cannot duplicate a video.
+    const restarts = (t.value.restarts || 0) + 1;
+    if (restarts > YOUTUBE_MAX_SESSION_RESTARTS)
+      throw new NonRetryableError('YouTube upload sessions keep expiring; try publishing again later.');
+    await save(env, post.id, 'youtube', 'uploading', {
+      youtubeFormat: t.value.youtubeFormat,
+      restarts,
+    });
+    return false;
+  }
   if (probe.status !== 308) await checked(probe);
   const offset = confirmedOffset(probe.headers.get('Range'));
   if (offset >= media.size) throw new Error('Waiting for YouTube completion.');
-  const length = Math.min(8 * 1024 ** 2, media.size - offset),
+  const length = Math.min(YOUTUBE_CHUNK_BYTES, media.size - offset),
     object = await env.MEDIA.get(media.object_key, { range: { offset, length } });
   if (!object) throw new NonRetryableError('Media object missing.');
   // Only one bounded chunk is buffered, below the Worker memory limit.
@@ -369,14 +406,23 @@ export class PublishPost extends WorkflowEntrypoint<Env, { runId: string }> {
       if (skip) continue;
       try {
         if (platform === 'youtube') {
+          // Every chunk step probes YouTube for the confirmed offset first, so re-running a
+          // step (or a whole later run) resumes the same upload and can never create a duplicate.
           let complete = false;
-          for (let chunk = 0; chunk < 700; chunk++) {
-            complete = await step.do(`youtube chunk ${chunk}`, retry, () =>
-              youtubeChunk(this.env, context.post, context.media),
-            );
-            if (complete) break;
+          let resumeRound = 0;
+          const budget = Math.ceil(context.media.size / YOUTUBE_CHUNK_BYTES) * 2 + 20;
+          for (let chunk = 0; chunk < budget && !complete; chunk++) {
+            try {
+              complete = await step.do(`youtube chunk ${chunk}`, retry, () =>
+                youtubeChunk(this.env, context.post, context.media),
+              );
+            } catch (error) {
+              if (isTerminal(error) || resumeRound >= YOUTUBE_RESUME_DELAYS.length) throw error;
+              await step.sleep(`youtube resume wait ${resumeRound}`, YOUTUBE_RESUME_DELAYS[resumeRound]);
+              resumeRound++;
+            }
           }
-          if (!complete) throw new ReviewError('Upload exceeded its recovery budget.');
+          if (!complete) throw new Error('YouTube upload did not finish within its chunk budget.');
         } else if (platform === 'instagram') {
           await step.do('instagram create container', retry, () =>
             createInstagram(this.env, context.post, context.media),
@@ -416,20 +462,28 @@ export class PublishPost extends WorkflowEntrypoint<Env, { runId: string }> {
         await step.do(`${platform} record failure`, async () => {
           const t = await target(this.env, context.post.id, platform);
           if (t.status === 'success') return;
+          // YouTube resumable uploads are idempotent (one session = at most one video), so an
+          // interrupted upload is retryable rather than uncertain. Meta publishes are not.
+          const youtube = platform === 'youtube';
+          const terminal = isTerminal(error);
           const review =
             error instanceof ReviewError ||
-            t.status === 'sending' ||
-            !!t.value.session ||
+            (!youtube && (t.status === 'sending' || !!t.value.session)) ||
             (platform === 'facebook' && !!t.value.id);
+          const detail = error instanceof Error ? error.message : String(error);
           const message = review
             ? 'Provider outcome needs review; check the remote account before retrying.'
-            : error instanceof NonRetryableError || error instanceof AppError
-              ? error.message
-              : 'Publishing failed after bounded retries. Check provider availability and reconnect if needed.';
+            : terminal
+              ? detail
+              : youtube
+                ? `YouTube upload interrupted (${detail.slice(0, 200)}); it will resume from the last confirmed byte.`
+                : 'Publishing failed after bounded retries. Check provider availability and reconnect if needed.';
+          if (youtube && !review) t.value.autoResume = !terminal;
           await this.env.DB.batch([
-            this.env.DB.prepare('UPDATE targets SET status=?,error=? WHERE post_id=? AND platform=?').bind(
+            this.env.DB.prepare('UPDATE targets SET status=?,error=?,data=? WHERE post_id=? AND platform=?').bind(
               review ? 'review' : 'failed',
               message,
+              JSON.stringify(t.value),
               context.post.id,
               platform,
             ),
